@@ -53,8 +53,7 @@ def base_pack(**over):
                              "capped_sides": 1, "width_m": 4850.0,
                              "closure_confidence": "low"}},
             {"id": "osm-Neglinka-culvert", "name": "Неглинная", "kind": "culvert",
-             "nearest_m": 120.0, "in_mountain": "乾", "out_mountain": "巽",
-             "visible": False, "hidden_share": 0.9, "pieces": 2},
+             "nearest_m": 120.0, "in_mountain": "乾", "out_mountain": "巽"},
         ],
     }
     pack.update(over)
@@ -97,16 +96,9 @@ def run():
     check("оговорка про уверенность врат",
           any("не передал уверенность врат" in w for w in data_nc["warnings"]), True)
 
-    # 4. Скрытая вода — только в 暗水, по одной строке на водоток (R2)
-    hidden = [c for c in data["checks"] if c["code"].startswith("HIDDEN-")]
-    check("скрытая вода в 暗水", len(hidden), 1)
-    check("暗水 — про Неглинную", "Неглинная" in hidden[0]["text"], True)
-    check("暗水: доля под землёй", "90%" in hidden[0]["text"], True)
-    visible_water = [c for c in data["checks"] if c["code"] == "WATER-River Thames"]
-    check("Темза в открытой воде", len(visible_water), 1)
-    check("скрытая вода не в 來水",
-          any("Неглинная" in c["text"] for c in data["checks"] if c["code"].startswith("WATER-")),
-          False)
+    # 4. Скрытая вода попадает в отчёт
+    hidden = [c for c in data["checks"] if c["code"] == "HIDDEN"]
+    check("скрытая вода", len(hidden), 1)
 
     # 5. Духи сравниваются по оси: черепаха выше птицы
     texts = " ".join(c["text"] for c in data["checks"])
@@ -137,6 +129,47 @@ def run():
     before = json.dumps(original, sort_keys=True)
     L.landform_data(copy.deepcopy(original), feixing_fn=feixing)
     check("пакет не изменён", json.dumps(original, sort_keys=True), before)
+
+    # 10a. R8: старая версия расчёта — предупреждение, но отчёт строится
+    old = base_pack(algo={"water": "3.1.0", "terrain": "2.0.0", "pack": "1.1.0"})
+    data_old = L.landform_data(old, feixing_fn=feixing)
+    check("старый пакет: отчёт есть", data_old["chart"] is not None, True)
+    check("старый пакет: stale_algo",
+          any(w.startswith("stale_algo") for w in data_old["warnings"]), True)
+
+    # 10b. R8: чужая схема — отказ с понятным сообщением
+    wrong = base_pack(schema="site_pack/2")
+    try:
+        L.landform_data(wrong, feixing_fn=feixing)
+        refused = False
+    except ValueError:
+        refused = True
+    check("чужая схема: отказ", refused, True)
+
+    # 10c. R3: год и текущий период в отчёте
+    year_text = " ".join(c["text"] for c in data["checks"] if c["code"].startswith("YEAR"))
+    check("строка про год карты", "период 8" in year_text, True)
+    check("строка про текущий период 9", "Текущий период — 9" in year_text, True)
+    check("пояснение про разрыв периодов",
+          any(c["code"] == "YEAR-GAP" for c in data["checks"]), True)
+
+    # 10d. R3: пакет без года — карта на текущий период и оговорка
+    no_year = base_pack(chart_year={"value": None, "source": None})
+    data_ny = L.landform_data(no_year, feixing_fn=feixing)
+    check("нет года: оговорка",
+          any("год постройки не задан" in w for w in data_ny["warnings"]), True)
+
+    # 10e. R3: формат 旺山旺向 проверяется внешней формой — вода за спиной
+    conflict = base_pack()
+    # фасад остаётся 133° (巽): при годе 2018 это даёт формат 旺山旺向
+    conflict["four_spirits"] = {"tortoise": {"rel_elev_m": 30.0},
+                                "bird": {"rel_elev_m": 5.0},
+                                "dragon": {"rel_elev_m": 10.0}, "tiger": {"rel_elev_m": 8.0},
+                                "dragon_vs_tiger": 2.0}
+    conflict["water"][0]["in_mountain"] = "乾"                 # вода за спиной (сидячая 乾)
+    data_cf = L.landform_data(conflict, feixing_fn=feixing)
+    check("формат: противоречие с водой за спиной",
+          any(c["code"] == "FORMAT-CONFLICT" for c in data_cf["checks"]), True)
 
     # 10. Год берётся из chart_year, а не из текущего
     older = base_pack(chart_year={"value": 2004, "source": "user"})

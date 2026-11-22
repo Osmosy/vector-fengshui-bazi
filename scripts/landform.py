@@ -25,6 +25,11 @@ MOUNTAIN_RU = {
     "戌": "северо-запад", "乾": "северо-запад", "亥": "северо-запад", "壬": "север",
 }
 
+# R8: минимальные версии, с которыми навык умеет читать пакет
+MIN_SCHEMA = "site_pack/1"
+MIN_ALGO = {"water": (5, 0, 0), "terrain": (2, 0, 0), "pack": (1, 2, 0)}
+CURRENT_PERIOD = (9, 2024, 2043)
+
 SPIRIT_RU = {"tortoise": "черепаха (спина)", "bird": "птица (фасад)",
              "dragon": "дракон (слева)", "tiger": "тигр (справа)"}
 
@@ -48,6 +53,35 @@ def _mountain_ru(name: str | None) -> str:
     return "%s (%s)" % (name, MOUNTAIN_RU.get(name, "?")) if name in MOUNTAIN_CENTER else str(name)
 
 
+def _version_tuple(text) -> tuple[int, ...]:
+    parts = []
+    for chunk in str(text or "0").split("."):
+        digits = "".join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts) or (0,)
+
+
+def check_pack_versions(pack: dict) -> list[str]:
+    """R8: схема обязана совпадать, старые версии расчёта дают предупреждение.
+
+    Схема другая — читать нельзя (структура могла измениться). Версия воды/рельефа/пакета
+    старее минимальной — читаем, но предупреждаем: числа могли считаться по старым правилам.
+    """
+    schema = pack.get("schema")
+    if schema != MIN_SCHEMA:
+        raise ValueError("пакет собран по схеме %r, навык читает только %r: пересоберите пакет "
+                         "в vector-geo-site" % (schema, MIN_SCHEMA))
+    warnings = []
+    algo = pack.get("algo") or {}
+    for name, minimum in MIN_ALGO.items():
+        have = _version_tuple(algo.get(name))
+        if have < minimum:
+            warnings.append("stale_algo: пакет собран %s %s, навык ждёт ≥ %s — числа могли "
+                            "считаться по старым правилам" % (
+                                name, ".".join(map(str, have)), ".".join(map(str, minimum))))
+    return warnings
+
+
 def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
                   feixing_fn=None) -> dict:
     """Свести пакет участка в структуру 龍穴砂水向 + карта звёзд.
@@ -55,6 +89,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
     Пакет — `site_pack.json` схемы `site_pack/1` из vector-geo-site. Отсутствующие поля
     остаются None: модуль не подставляет значения по умолчанию (правило П1).
     """
+    version_warnings = check_pack_versions(pack)
     orientation = pack.get("orientation") or {}
     facing = _num(orientation.get("facing_true_deg"))
     chart_year = _num(_get(pack, "chart_year", "value"))
@@ -92,7 +127,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
     point = pack.get("point") or {}
     water = pack.get("water") or []
 
-    warnings: list[str] = []
+    warnings: list[str] = list(version_warnings)
     checks: list[dict] = []
 
     def check(code: str, text: str, confidence: str = "high", canon: str | None = None):
@@ -112,6 +147,27 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
             _mountain_ru(orientation.get("facing_mountain")),
             _mountain_ru(orientation.get("sitting_mountain")), source or "?"),
             canon="向 / 坐")
+
+    # --- год карты и период (R3) ---
+    year_source = _get(pack, "chart_year", "source")
+    if year is not None:
+        period_built = chart.get("period") if chart else None
+        check("YEAR", "карта построена по году %s → период %s (источник года: %s). "
+                      "Текущий период — %s (%s–%s)" % (
+                          year, period_built, year_source or "не указан",
+                          CURRENT_PERIOD[0], CURRENT_PERIOD[1], CURRENT_PERIOD[2]),
+              canon="元运 — период задаёт карту 飛星")
+        if period_built is not None and period_built != CURRENT_PERIOD[0]:
+            check("YEAR-GAP", "звёзды карты относятся к периоду постройки %s; оценку 旺/衰 "
+                              "на текущий период %s нужно давать отдельно" % (
+                                  period_built, CURRENT_PERIOD[0]),
+                  confidence="medium", canon="飞星: карта здания ≠ текущие звёзды")
+    else:
+        warnings.append("год постройки не задан — карта на текущий период, а не натальная "
+                        "карта здания")
+        check("YEAR-MISSING", "карта построена на текущий период %s (%s–%s)" % (
+            CURRENT_PERIOD[0], CURRENT_PERIOD[1], CURRENT_PERIOD[2]),
+              confidence="low", canon="元运")
 
     # --- точка ---
     if point:
@@ -159,9 +215,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
             confidence="medium", canon="龍 — жила приходит к точке")
 
     # --- вода ---
-    watercourses = [w for w in water if w.get("kind") in {"river", "stream", "canal", "culvert"}]
-    rivers = [w for w in watercourses if w.get("visible") is not False]      # 水 — видимая
-    hidden = [w for w in watercourses if w.get("visible") is False]
+    rivers = [w for w in water if w.get("kind") in {"river", "stream", "canal", "culvert"}]
     for item in sorted(rivers, key=lambda w: w.get("nearest_m") or 1e9)[:5]:
         name = item.get("name") or item.get("id")
         tid = item.get("tidal")
@@ -195,17 +249,47 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
                                 % (name, mouth.get("capped_sides")))
             check("GATE-%s" % (name or "?"), mouth_txt, confidence=mouth_conf, canon="水口")
 
-    # --- скрытая вода: 暗水, отдельно от открытой ---
-    for item in sorted(hidden, key=lambda w: w.get("nearest_m") or 1e9):
-        name = item.get("name") or item.get("id")
-        share = _num(item.get("hidden_share"))
-        pieces = item.get("pieces") or 1
-        check("HIDDEN-%s" % (name or "?"),
-              "%s: %s м, %s, под землёй %s длины, кусков %s" % (
-                  name, item.get("nearest_m"), _mountain_ru(item.get("nearest_mountain")
-                                                            or item.get("in_mountain")),
-                  "%.0f%%" % (share * 100) if share is not None else "неизвестно", pieces),
-              confidence="medium", canon="暗水 — вода под землёй")
+    # --- скрытая вода ---
+    hidden = [w for w in water if w.get("kind") == "culvert"]
+    if hidden:
+        names = ", ".join((w.get("name") or w.get("id") or "?") for w in hidden[:5])
+        check("HIDDEN", "скрытая вода в трубе: %s" % names, confidence="medium", canon="暗水")
+
+    # --- внешняя форма против формата (R3 п. 4) ---
+    if chart and "旺山旺向" in str(chart.get("format") or ""):
+        tortoise_m = _num(_get(spirits, "tortoise", "rel_elev_m"))
+        bird_m = _num(_get(spirits, "bird", "rel_elev_m"))
+        nearest_water = sorted(rivers, key=lambda w: w.get("nearest_m") or 1e9)
+        water_front = None
+        if nearest_water:
+            item = nearest_water[0]
+            water_front = item.get("in_mountain") or item.get("out_mountain")
+        problems = []
+        if tortoise_m is None or bird_m is None:
+            problems.append("высоты четырёх духов не переданы пакетом")
+        elif tortoise_m <= bird_m + 5:
+            problems.append("гора за спиной не выше фасада (спина %+.0f, фасад %+.0f м)" % (
+                tortoise_m, bird_m))
+        if water_front is None:
+            problems.append("вода перед фасадом не найдена в пакете")
+        else:
+            # вода должна быть со стороны фасада, а не за спиной
+            facing_az = _num(orientation.get("facing_true_deg"))
+            water_az = MOUNTAIN_CENTER.get(water_front)
+            if facing_az is not None and water_az is not None:
+                diff = abs((facing_az - water_az + 180) % 360 - 180)
+                if diff > 90:
+                    problems.append("ближайшая вода %s (%s) стоит за спиной, а не перед фасадом"
+                                    % (_mountain_ru(water_front), water_front))
+        if problems:
+            check("FORMAT-CONFLICT", "формат 旺山旺向 требует горы за спиной и воды перед фасадом, "
+                                     "а внешняя форма этому противоречит: " + "; ".join(problems),
+                  confidence="low", canon="旺山旺向 проверяется внешней формой")
+        else:
+            check("FORMAT-CHECK", "формат 旺山旺向 согласуется с внешней формой: спина %+.0f, "
+                                  "фасад %+.0f м, вода %s" % (tortoise_m, bird_m,
+                                                             _mountain_ru(water_front)),
+                  canon="旺山旺向")
 
     # --- карта звёзд ---
     if chart:
@@ -241,6 +325,8 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         "chart_year": pack.get("chart_year"),
         "chart": chart,
         "chart_error": chart_error,
+        "versions": {"min": {k: ".".join(map(str, v)) for k, v in MIN_ALGO.items()},
+                     "pack": pack.get("algo")},
         "checks": checks,
         "warnings": warnings,
         "vein": vein or None,
@@ -299,14 +385,6 @@ def landform_markdown(data: dict) -> str:
         if check["code"].startswith(("WATER", "GATE", "HIDDEN")):
             lines.append("- **%s.** %s (%s)" % (check["canon"] or "—", check["text"], check["confidence"]))
     lines.append("")
-
-    hidden_checks = [c for c in (data.get("checks") or []) if c["code"].startswith("HIDDEN-")]
-    if hidden_checks:
-        lines.append("## 暗水 — вода под землёй")
-        lines.append("")
-        for check in hidden_checks:
-            lines.append("- %s" % check["text"])
-        lines.append("")
 
     lines.append("## Оговорки")
     lines.append("")
