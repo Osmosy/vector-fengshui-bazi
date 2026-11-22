@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: "Якоря расчёта бацзы"
+        run: cd scripts && python3 test_anchors.py
+      - name: "Разбор пакета участка"
+        run: cd scripts && python3 test_landform.py
+      - name: "landform на реальном пакете"
+        run: |
+          python3 scripts/fengshui_bazi_calc.py landform \
+            --pack tests/fixtures/london-city-site_pack.json --json > /tmp/landform.json
+          python3 - <<'PY'
+          import json
+          data = json.load(open("/tmp/landform.json"))
+          assert data["schema"] == "site_pack/1", data.get("schema")
+          assert data["chart"] is not None, "карта звёзд не рассчитана"
+          assert data["warnings"], "нет оговорок: пакет с осью по модели обязан их дать"
+          print("landform: схема", data["schema"], "| проверок", len(data["checks"]),
+                "| оговорок", len(data["warnings"]))
+          PY
+      - name: "Markdown-отчёт собирается"
+        run: |
+          python3 scripts/fengshui_bazi_calc.py landform \
+            --pack tests/fixtures/london-city-site_pack.json --out /tmp/landform.md
+          grep -q "## 向" /tmp/landform.md && grep -q "## 水" /tmp/landform.md
