@@ -85,6 +85,17 @@ def run():
     check("врата посчитаны", len(gates), 1)
     check("врата low-уверенность", gates[0]["confidence"], "low")
 
+    # 3a. Пакет без closure_confidence: unknown и оговорка, а не подставленный medium
+    no_conf = base_pack()
+    no_conf["water"][0]["water_mouth"] = {"mountain": "乙", "closure_index": 0.01,
+                                          "width_capped": True, "capped_sides": 1,
+                                          "width_m": 4850.0}
+    data_nc = L.landform_data(no_conf, feixing_fn=feixing)
+    gates_nc = [c for c in data_nc["checks"] if c["code"].startswith("GATE-")]
+    check("врата без уверенности → unknown", gates_nc[0]["confidence"], "unknown")
+    check("оговорка про уверенность врат",
+          any("не передал уверенность врат" in w for w in data_nc["warnings"]), True)
+
     # 4. Скрытая вода попадает в отчёт
     hidden = [c for c in data["checks"] if c["code"] == "HIDDEN"]
     check("скрытая вода", len(hidden), 1)

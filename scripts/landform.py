@@ -174,7 +174,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
               "%s: %s м, вход %s, выход %s, %s, %s%s" % (
                   name, item.get("nearest_m"), _mountain_ru(item.get("in_mountain")),
                   _mountain_ru(item.get("out_mountain")), bend, tide_txt, loop_txt),
-              confidence=item.get("flow_confidence") or "medium", canon="水 — 來水 / 去水")
+              confidence=item.get("flow_confidence") or "unknown", canon="水 — 來水 / 去水")
         mouth = item.get("water_mouth") or {}
         if mouth:
             closing = mouth.get("closure_index")
@@ -184,7 +184,10 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
             else:
                 mouth_txt = "врата %s: замкнутость %.2f, ширина %s м" % (
                     _mountain_ru(mouth.get("mountain")), closing, mouth.get("width_m"))
-                mouth_conf = mouth.get("closure_confidence") or "medium"
+                mouth_conf = mouth.get("closure_confidence") or "unknown"
+                if mouth_conf == "unknown":
+                    warnings.append("%s: пакет не передал уверенность врат (closure_confidence) — "
+                                    "число есть, доверия к нему нет" % (name or "?"))
             if mouth.get("width_capped"):
                 warnings.append("%s: замер врат упёрся в предел (сторон: %s) — число неполное"
                                 % (name, mouth.get("capped_sides")))
@@ -215,6 +218,10 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
             low_fields.append("water.flow:%s" % (item.get("name") or item.get("id")))
         if _get(item, "water_mouth", "closure_confidence") == "low":
             low_fields.append("water.closure:%s" % (item.get("name") or item.get("id")))
+    for item in water:
+        if item.get("flow_chosen") and not item.get("flow_confidence"):
+            warnings.append("water.flow:%s — правило течения без уверенности"
+                            % (item.get("name") or item.get("id")))
     if low_fields:
         warnings.append("поля с уверенностью low: " + ", ".join(sorted(set(low_fields))))
 
