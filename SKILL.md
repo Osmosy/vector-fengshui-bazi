@@ -66,6 +66,7 @@ metadata:
 |---|---|---|
 | Про характер, судьбу, 五行, 十神, 大运 по дате рождения | `references/bazi.md` | `pillars` |
 | Про квартиру/офис/направление/даты 飞星 | `references/fengshui.md` | `feixing`, `gua` |
+| Про местность, реки, холмы вокруг дома (龍穴砂水) | `references/fengshui.md` §9 | `landform --pack` |
 | Про число гуа, 4 счастливых направления | `references/fengshui.md` (раздел 八宅) | `gua` |
 | Про нумерологию (жизненный путь, психоматрица, личный год) | `references/numerology.md` | `numerology` |
 | «Мы совместимы?», 合婚, супружество, 桃花, «когда встречу…» | `references/supruzhestvo.md` | `match`, `zodiac` |
@@ -102,8 +103,13 @@ python3 fengshui_bazi_calc.py match --d1 1990-05-15 --t1 08:30 --g1 m \
 # Быстрая зодиакальная совместимость (生肖)
 python3 fengshui_bazi_calc.py zodiac --d1 1990-05-15 --d2 1992-03-08
 
-# Регрессионные тесты по якорным датам
+# Форма, вода и ориентация по готовому пакету участка (vector-geo-site)
+python3 fengshui_bazi_calc.py landform --pack /путь/site_pack.json \
+       [--annual 2026] [--json] [--out landform.md]
+
+# Регрессионные тесты по якорным датам и по пакету участка
 python3 test_anchors.py
+python3 test_landform.py
 ```
 
 Правила вызова:

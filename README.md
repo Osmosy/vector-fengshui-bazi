@@ -85,6 +85,9 @@ python3 fengshui_bazi_calc.py match --d1 1990-05-15 --t1 08:30 --g1 m \
 
 # Зодиакальная совместимость
 python3 fengshui_bazi_calc.py zodiac --d1 1990-05-15 --d2 1992-03-08
+
+# Местность по готовому пакету участка (vector-geo-site): 龍穴砂水向 + 飛星
+python3 fengshui_bazi_calc.py landform --pack /путь/site_pack.json --out landform.md
 ```
 
 Вывод ниже — не заглушка, а результат реального прогона:
@@ -112,6 +115,13 @@ $ python3 fengshui_bazi_calc.py pillars --date 1977-09-23 --time 19:00
 - время рождения местное, `--tz` задаёт пояс от UTC.
 
 ## Тесты
+
+```bash
+cd scripts
+python3 test_anchors.py     # 34 якоря по датам и гуа
+python3 test_landform.py    # 22 проверки разбора пакета участка
+```
+
 
 ```bash
 python3 scripts/test_anchors.py    # 34/34 проверок пройдено

@@ -11,6 +11,7 @@
   numerology   — числа западной нумерологии + психоматрица Пифагора
   match        — балльная совместимость пары (八字合婚, веса yinyuan-skills)
   zodiac       — быстрая зодиакальная совместимость (生肖)
+  landform     — форма, вода и ориентация по пакету участка (site_pack.json)
 
 Калибры: год — по 立春, месяц — по 12 节, день — смена в 23:00
 (флаг --yeci: 23:00–24:00 остаётся текущим днём). Солнечная долгота —
@@ -26,6 +27,7 @@ import argparse
 import json
 import math
 import sys
+from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
 UTC = timezone.utc
@@ -865,6 +867,25 @@ def cmd_zodiac(a):
     print("  " + v["verdict"])
 
 
+def cmd_landform(a):
+    """landform --pack: читает site_pack.json из vector-geo-site и сводит 龍穴砂水向."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import landform
+
+    pack = landform.load_pack(a.pack)
+    data = landform.landform_data(pack, annual=a.annual, tz=a.tz, feixing_fn=feixing_data)
+    if a.json:
+        print(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        text = landform.landform_markdown(data)
+        if a.out:
+            Path(a.out).write_text(text + "\n", encoding="utf-8")
+            print("отчёт: %s" % a.out)
+        else:
+            print(text)
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -910,6 +931,14 @@ def main(argv=None):
     p.add_argument("--tz", type=float, default=8.0)
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_match)
+
+    p = sub.add_parser("landform", help="форма, вода и ориентация по site_pack.json")
+    p.add_argument("--pack", required=True, help="путь к site_pack.json из vector-geo-site")
+    p.add_argument("--annual", type=int, default=None, help="год для годовых звёзд")
+    p.add_argument("--tz", type=float, default=8.0)
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--out", default=None, help="записать markdown в файл")
+    p.set_defaults(func=cmd_landform)
 
     p = sub.add_parser("zodiac")
     p.add_argument("--d1", required=True); p.add_argument("--d2", required=True)
