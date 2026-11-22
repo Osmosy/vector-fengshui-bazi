@@ -29,13 +29,13 @@ Codex CLI и ещё 30+ агентов, поддерживающих станд�
 ### Как Agent Skill (рекомендуется)
 
 ```bash
-npx skills add Osmosy/Vector-fengshui-bazi
+npx skills add <ВАШ_НИК>/Vector-fengshui-bazi
 ```
 
 или вручную — клонировать в каталог навыков вашего агента:
 
 ```bash
-git clone https://github.com/Osmosy/Vector-fengshui-bazi ~/.agents/skills/vector-fengshui-bazi
+git clone https://github.com/<ВАШ_НИК>/Vector-fengshui-bazi ~/.agents/skills/vector-fengshui-bazi
 # для Claude Code также подойдёт: ~/.claude/skills/vector-fengshui-bazi
 ```
 
@@ -124,6 +124,13 @@ Vector-fengshui-bazi/
 - Даты до 1900 и после 2100 — за пределами гарантированной точности.
 - 紫微斗数 / 奇门遁甲 доступны через
   [Numerologist_skills](https://github.com/FANzR-arch/Numerologist_skills).
+
+## Связанные проекты
+
+- [Osmosy/fengshui-bazi](https://github.com/Osmosy/fengshui-bazi-sources) — первоисточники
+  (классические тексты, CC BY 4.0). Этот репозиторий — самостоятельный
+  навык-калькулятор: собственный код и справочники, лицензия MIT. Ссылка
+  останется рабочей после возможного переименования (редирект GitHub).
 
 ## Отказ от ответственности
 
