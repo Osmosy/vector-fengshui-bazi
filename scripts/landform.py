@@ -159,7 +159,9 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
             confidence="medium", canon="龍 — жила приходит к точке")
 
     # --- вода ---
-    rivers = [w for w in water if w.get("kind") in {"river", "stream", "canal", "culvert"}]
+    watercourses = [w for w in water if w.get("kind") in {"river", "stream", "canal", "culvert"}]
+    rivers = [w for w in watercourses if w.get("visible") is not False]      # 水 — видимая
+    hidden = [w for w in watercourses if w.get("visible") is False]
     for item in sorted(rivers, key=lambda w: w.get("nearest_m") or 1e9)[:5]:
         name = item.get("name") or item.get("id")
         tid = item.get("tidal")
@@ -193,11 +195,17 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
                                 % (name, mouth.get("capped_sides")))
             check("GATE-%s" % (name or "?"), mouth_txt, confidence=mouth_conf, canon="水口")
 
-    # --- скрытая вода ---
-    hidden = [w for w in water if w.get("kind") == "culvert"]
-    if hidden:
-        names = ", ".join((w.get("name") or w.get("id") or "?") for w in hidden[:5])
-        check("HIDDEN", "скрытая вода в трубе: %s" % names, confidence="medium", canon="暗水")
+    # --- скрытая вода: 暗水, отдельно от открытой ---
+    for item in sorted(hidden, key=lambda w: w.get("nearest_m") or 1e9):
+        name = item.get("name") or item.get("id")
+        share = _num(item.get("hidden_share"))
+        pieces = item.get("pieces") or 1
+        check("HIDDEN-%s" % (name or "?"),
+              "%s: %s м, %s, под землёй %s длины, кусков %s" % (
+                  name, item.get("nearest_m"), _mountain_ru(item.get("nearest_mountain")
+                                                            or item.get("in_mountain")),
+                  "%.0f%%" % (share * 100) if share is not None else "неизвестно", pieces),
+              confidence="medium", canon="暗水 — вода под землёй")
 
     # --- карта звёзд ---
     if chart:
@@ -291,6 +299,14 @@ def landform_markdown(data: dict) -> str:
         if check["code"].startswith(("WATER", "GATE", "HIDDEN")):
             lines.append("- **%s.** %s (%s)" % (check["canon"] or "—", check["text"], check["confidence"]))
     lines.append("")
+
+    hidden_checks = [c for c in (data.get("checks") or []) if c["code"].startswith("HIDDEN-")]
+    if hidden_checks:
+        lines.append("## 暗水 — вода под землёй")
+        lines.append("")
+        for check in hidden_checks:
+            lines.append("- %s" % check["text"])
+        lines.append("")
 
     lines.append("## Оговорки")
     lines.append("")

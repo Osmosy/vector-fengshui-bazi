@@ -53,7 +53,8 @@ def base_pack(**over):
                              "capped_sides": 1, "width_m": 4850.0,
                              "closure_confidence": "low"}},
             {"id": "osm-Neglinka-culvert", "name": "Неглинная", "kind": "culvert",
-             "nearest_m": 120.0, "in_mountain": "乾", "out_mountain": "巽"},
+             "nearest_m": 120.0, "in_mountain": "乾", "out_mountain": "巽",
+             "visible": False, "hidden_share": 0.9, "pieces": 2},
         ],
     }
     pack.update(over)
@@ -96,9 +97,16 @@ def run():
     check("оговорка про уверенность врат",
           any("не передал уверенность врат" in w for w in data_nc["warnings"]), True)
 
-    # 4. Скрытая вода попадает в отчёт
-    hidden = [c for c in data["checks"] if c["code"] == "HIDDEN"]
-    check("скрытая вода", len(hidden), 1)
+    # 4. Скрытая вода — только в 暗水, по одной строке на водоток (R2)
+    hidden = [c for c in data["checks"] if c["code"].startswith("HIDDEN-")]
+    check("скрытая вода в 暗水", len(hidden), 1)
+    check("暗水 — про Неглинную", "Неглинная" in hidden[0]["text"], True)
+    check("暗水: доля под землёй", "90%" in hidden[0]["text"], True)
+    visible_water = [c for c in data["checks"] if c["code"] == "WATER-River Thames"]
+    check("Темза в открытой воде", len(visible_water), 1)
+    check("скрытая вода не в 來水",
+          any("Неглинная" in c["text"] for c in data["checks"] if c["code"].startswith("WATER-")),
+          False)
 
     # 5. Духи сравниваются по оси: черепаха выше птицы
     texts = " ".join(c["text"] for c in data["checks"])
