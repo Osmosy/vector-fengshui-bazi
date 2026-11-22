@@ -122,6 +122,35 @@
 | 水 | `water[]`: `nearest_m`, `in_mountain`/`out_mountain`, `bend`, `bend_kind`, `tidal`, `water_mouth` | 來水 — вход воды, 去水 — выход; `bend: outer` у участка = 反弓 |
 | 穴 | `point`: уклон, экспозиция, форма | ровный участок на склоне — обычная точка, гребень — 骑龙 |
 
+### Таблица соответствия: поле пакета → раздел отчёта → правило
+
+| Поле пакета | Раздел | Правило фэншуй |
+|---|---|---|
+| `orientation.facing_true_deg`, `facing_mountain`, `sitting_mountain` | 向 | 向 / 坐 — ось задаёт всю карту |
+| `orientation.source`, `confidence` | 向, Оговорки | при `model`/`low` карта предварительная |
+| `chart_year.value`, `source` | 向 | 元运 — период постройки; отдельно текущий период |
+| `sectors[].rings[]` (`max_rel_elev_m`, `horizon_deg`) | 砂 | 砂 — охрана и высоты по 24 горам |
+| `four_spirits.*` (`rel_elev_m`, `continuity`) | 砂 | 四神: 玄武 за спиной, 朱雀 перед фасадом, 青龍/白虎 по бокам |
+| `dragon_vein.*` (`length_km`, `bends`, `alive`) | 砂 | 龍 — жила приходит к точке, извилистая «живая» |
+| `point.slope_deg`, `aspect_deg`, `shape` | 穴 | 穴 — форма точки (склон, гребень, ровное) |
+| `water[].visible: true` + `nearest_m`, `in_mountain`, `out_mountain` | 水 | 來水 / 去水 |
+| `water[].bend`, `bend_kind` | 水 | 反弓 (outer) / 玉帶 (inner) |
+| `water[].loop`, `site_position` | 水 | петля: `inside` — вода охватывает, `outside_convex` — 反弓 |
+| `water[].tidal`, `tidal_source` | 水 | приливная вода: 去水 возвращается |
+| `water[].water_mouth.*` (`closure_index`, `closure_confidence`) | 水口 | 水口 — замкнутость врат |
+| `water[].visible: false`, `hidden_share` | 暗水 | 暗水 — скрытая вода (трубы, засыпанные реки) |
+| `quality.warnings`, `violations` | Оговорки | переносятся в ответ без смягчения |
+
+**Что интерпретатор не читает и почему:**
+
+- `sectors[].rings[].water_share` — поле отключено в пакете: маска воды не откалибрована;
+- `roads` — дороги размечены как вода ради единой схемы, но для 煞 их пока не используем;
+- `files.sha256`, `algo`, `schema` — служебные: версии проверяются (`stale_algo`),
+  хеши нужны для сверки `water.geojson`, в разбор не идут;
+- `flow_dem_dir`, `dem_slope_snr` — нужны для доверия к `flow_chosen`, отдельного смысла
+  в фэншуй не несут;
+- `confluences[].with` — используется как контекст (слияние рядом), но не как отдельная форма.
+
 Правила чтения:
 
 - **Уверенность важнее числа.** Поля с `confidence: low` не дают категоричных выводов:

@@ -130,6 +130,47 @@ def run():
     L.landform_data(copy.deepcopy(original), feixing_fn=feixing)
     check("пакет не изменён", json.dumps(original, sort_keys=True), before)
 
+    # 10a. R8: старая версия расчёта — предупреждение, но отчёт строится
+    old = base_pack(algo={"water": "3.1.0", "terrain": "2.0.0", "pack": "1.1.0"})
+    data_old = L.landform_data(old, feixing_fn=feixing)
+    check("старый пакет: отчёт есть", data_old["chart"] is not None, True)
+    check("старый пакет: stale_algo",
+          any(w.startswith("stale_algo") for w in data_old["warnings"]), True)
+
+    # 10b. R8: чужая схема — отказ с понятным сообщением
+    wrong = base_pack(schema="site_pack/2")
+    try:
+        L.landform_data(wrong, feixing_fn=feixing)
+        refused = False
+    except ValueError:
+        refused = True
+    check("чужая схема: отказ", refused, True)
+
+    # 10c. R3: год и текущий период в отчёте
+    year_text = " ".join(c["text"] for c in data["checks"] if c["code"].startswith("YEAR"))
+    check("строка про год карты", "период 8" in year_text, True)
+    check("строка про текущий период 9", "Текущий период — 9" in year_text, True)
+    check("пояснение про разрыв периодов",
+          any(c["code"] == "YEAR-GAP" for c in data["checks"]), True)
+
+    # 10d. R3: пакет без года — карта на текущий период и оговорка
+    no_year = base_pack(chart_year={"value": None, "source": None})
+    data_ny = L.landform_data(no_year, feixing_fn=feixing)
+    check("нет года: оговорка",
+          any("год постройки не задан" in w for w in data_ny["warnings"]), True)
+
+    # 10e. R3: формат 旺山旺向 проверяется внешней формой — вода за спиной
+    conflict = base_pack()
+    # фасад остаётся 133° (巽): при годе 2018 это даёт формат 旺山旺向
+    conflict["four_spirits"] = {"tortoise": {"rel_elev_m": 30.0},
+                                "bird": {"rel_elev_m": 5.0},
+                                "dragon": {"rel_elev_m": 10.0}, "tiger": {"rel_elev_m": 8.0},
+                                "dragon_vs_tiger": 2.0}
+    conflict["water"][0]["in_mountain"] = "乾"                 # вода за спиной (сидячая 乾)
+    data_cf = L.landform_data(conflict, feixing_fn=feixing)
+    check("формат: противоречие с водой за спиной",
+          any(c["code"] == "FORMAT-CONFLICT" for c in data_cf["checks"]), True)
+
     # 10. Год берётся из chart_year, а не из текущего
     older = base_pack(chart_year={"value": 2004, "source": "user"})
     data3 = L.landform_data(older, feixing_fn=feixing)

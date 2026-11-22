@@ -397,7 +397,7 @@ def feixing_data(facing_deg: float | None, facing_name: str | None,
 
     full = {pal: (mchart[pal], chart[pal], fchart[pal]) for pal in range(1, 10)}
     if mchart[pal_sit] == period and fchart[pal_fac] == period:
-        fmt = "旺山旺向 (旺山旺向 — лучший формат)"
+        fmt = "旺山旺向 (гора у спины, вода у фасада)"
     elif fchart[pal_fac] == period and mchart[pal_fac] == period:
         fmt = "双星到向 (двойная звезда на фасаде)"
     elif mchart[pal_sit] == period and fchart[pal_sit] == period:
