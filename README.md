@@ -47,7 +47,7 @@
 
 ## Живая схема
 
-Смотреть онлайн: https://osmosy.github.io/vector-fengshui-bazi/
+Смотреть онлайн: https://osmosy.github.io/vector-fengshui-bazi/docs/diagram.html
 
 `docs/diagram.html` — схема разбора пакета: врата версий → форма, вода, климат, звёзды →
 проверки → отчёт. Открывается из файла без сети; клик по блоку объясняет, откуда берутся числа,
