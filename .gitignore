@@ -1,3 +1,5 @@
 __pycache__/
 *.py[oc]
 .DS_Store
+# доказательства прогона archify visual-check, не документация
+*.visual-check.*
