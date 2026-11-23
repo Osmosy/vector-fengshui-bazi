@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vector-fengshui-bazi — от пакета к отчёту</title>
+<script>
+  (function () {
+    const saved = localStorage.getItem('theme');
+    const dark = saved ? saved === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.classList.toggle('dark', dark);
+  })();
+</script>
+<style>
+  :root {
+    --bg: #FAF9F5; --surface: #FFFFFF; --surface2: #F0EEE6;
+    --ink: #141413; --body: #3D3D3A; --muted: #87867F;
+    --line: #D1CFC5; --line-soft: #E6E3DA;
+    --clay: #9C5A2E; --clay-soft: rgba(156,90,46,0.10);
+    --olive: #566E42; --olive-soft: rgba(86,110,66,0.12);
+    --blue: #47617F; --blue-soft: rgba(71,97,127,0.10);
+    --plum: #7A4560; --plum-soft: rgba(122,69,96,0.10);
+    --zone: rgba(20,20,19,0.022); --zone-line: #D1CFC5;
+    --serif: ui-serif, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  html.dark {
+    --bg: #131312; --surface: #1E1E1C; --surface2: #272725;
+    --ink: #F5F3EC; --body: #CFCDC4; --muted: #8A8981;
+    --line: #3A3A37; --line-soft: #262624;
+    --clay: #D89A63; --clay-soft: rgba(216,154,99,0.15);
+    --olive: #9AB277; --olive-soft: rgba(154,178,119,0.16);
+    --blue: #8AA8C4; --blue-soft: rgba(138,168,196,0.16);
+    --plum: #C48FA8; --plum-soft: rgba(196,143,168,0.16);
+    --zone: rgba(250,249,245,0.028); --zone-line: #34342F;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { background: var(--bg); color: var(--body); font-family: var(--sans);
+         -webkit-font-smoothing: antialiased; display: flex; flex-direction: column; overflow: hidden; }
+
+  .bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+         padding: 12px 20px; border-bottom: 1px solid var(--line-soft); flex: none; }
+  .bar h1 { font-family: var(--serif); font-weight: 500; font-size: 19px; color: var(--ink); letter-spacing: -0.01em; }
+  .bar .sub { font-family: var(--mono); font-size: 10.5px; color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+  .spacer { flex: 1; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { font-family: var(--mono); font-size: 11px; letter-spacing: .04em; padding: 5px 11px;
+          border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--muted);
+          cursor: pointer; transition: all .15s ease; }
+  .chip:hover { color: var(--ink); border-color: var(--muted); }
+  .chip.on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  #themeToggle { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
+                 padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: transparent;
+                 color: var(--muted); cursor: pointer; }
+  #themeToggle:hover { color: var(--ink); border-color: var(--muted); }
+
+  .stage { flex: 1; position: relative; min-height: 0; }
+  .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  @media (min-width: 981px) { .stage svg { right: 366px; width: calc(100% - 366px); } }
+
+  .zone rect { fill: var(--zone); stroke: var(--zone-line); stroke-width: 1; stroke-dasharray: 5 5; rx: 16; }
+  .zone .ztitle { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; fill: var(--muted); }
+  .zone .zsub { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); opacity: .75; }
+
+  .node { cursor: pointer; }
+  .node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; rx: 10;
+               transition: stroke .15s ease, filter .15s ease; }
+  .node:hover rect { stroke: var(--muted); }
+  .node.sel rect { stroke: var(--clay) !important; stroke-width: 2.2; }
+  .node .t { font-family: var(--sans); font-size: 14px; font-weight: 600; fill: var(--ink); pointer-events: none; }
+  .node .m { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); pointer-events: none; }
+  .node .k { font-family: var(--mono); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase;
+             fill: var(--clay); pointer-events: none; }
+  .node.store rect { fill: var(--surface2); }
+  .node.calc rect { fill: var(--blue-soft); stroke: var(--blue); }
+  .node.calc .k { fill: var(--blue); }
+  .node.gate rect { fill: var(--olive-soft); stroke: var(--olive); }
+  .node.gate .k { fill: var(--olive); }
+  .node.out rect { fill: var(--plum-soft); stroke: var(--plum); }
+  .node.out .k { fill: var(--plum); }
+  .node.ext rect { stroke-dasharray: 6 3; }
+
+  .edge { stroke: var(--muted); stroke-width: 1.5; fill: none; marker-end: url(#a-mut);
+          transition: opacity .2s ease, stroke .2s ease; }
+  .edge.hub { stroke-width: 2.2; }
+  .elbl { font-family: var(--mono); font-size: 10px; fill: var(--muted); transition: opacity .2s ease; }
+
+  .stage.flowing .edge { opacity: .12; }
+  .stage.flowing .elbl { opacity: .12; }
+  .stage.flowing .node { opacity: .28; }
+  .stage.flowing .zone { opacity: .45; }
+  .stage.flowing .edge.lit { opacity: 1; stroke: var(--clay); marker-end: url(#a-clay);
+                             stroke-dasharray: 7 5; animation: march .9s linear infinite; }
+  .stage.flowing .elbl.lit { opacity: 1; fill: var(--clay); }
+  .stage.flowing .node.lit { opacity: 1; }
+  .stage.flowing .node.lit rect { stroke: var(--clay); }
+  @keyframes march { to { stroke-dashoffset: -12; } }
+  @media (prefers-reduced-motion: reduce) { .stage.flowing .edge.lit { animation: none; } }
+
+  .card { position: absolute; max-width: 380px; background: var(--surface); border: 1px solid var(--line);
+          border-radius: 12px; padding: 14px 16px; box-shadow: 0 6px 24px rgba(0,0,0,.10); }
+  #detail { right: 16px; bottom: 16px; width: 330px; max-height: 34vh; overflow: auto; }
+  #detail h3 { font-family: var(--serif); font-weight: 500; font-size: 17px; color: var(--ink); margin-bottom: 2px; }
+  #detail .meta { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-bottom: 8px; }
+  #detail p { font-size: 12.5px; line-height: 1.55; margin-bottom: 7px; }
+  #detail code, #flowcap code { font-family: var(--mono); font-size: 11px; color: var(--clay); }
+  #detail ul { margin: 0 0 8px 16px; }
+  #detail li { font-size: 12.5px; line-height: 1.5; margin-bottom: 3px; }
+  #detail .close { position: absolute; top: 8px; right: 10px; border: 0; background: transparent;
+                   color: var(--muted); font-size: 16px; cursor: pointer; line-height: 1; }
+  #detail .close:hover { color: var(--ink); }
+  #flowcap { left: 16px; bottom: 16px; max-width: 420px; display: none; padding: 10px 14px; }
+  #flowcap.show { display: block; }
+  #flowcap .fname { font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase;
+                    color: var(--clay); margin-bottom: 0; }
+  #flowcap .fcount { font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 4px; }
+  .src { position: absolute; top: 10px; right: 16px; font-family: var(--mono); font-size: 10px;
+         color: var(--muted); opacity: .8; }
+  @media (max-width: 980px) {
+    body { overflow: auto; }
+    .stage { min-height: 74vh; }
+    #flowcap { display: none !important; }
+    #detail { position: static; width: auto; margin: 76vh 16px 16px; max-height: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <div>
+    <h1>vector-fengshui-bazi — от пакета к отчёту</h1>
+    <div class="sub">landform · 40/40 проверок · 34/34 якорей · MIN_ALGO water 6.1.0 · climate 1.0.0</div>
+  </div>
+  <div class="spacer"></div>
+  <div class="chips" id="chips">
+    <button class="chip on" data-flow="all">Всё</button>
+    <button class="chip" data-flow="report">Полный разбор</button>
+    <button class="chip" data-flow="nogear">Без года</button>
+    <button class="chip" data-flow="stale">Старый пакет</button>
+    <button class="chip" data-flow="ci">Фикстура в CI</button>
+  </div>
+  <button id="themeToggle">Тема</button>
+</div>
+
+<div class="stage" id="stage">
+<svg viewBox="0 0 1600 1020" preserveAspectRatio="xMidYMid meet" role="img"
+     aria-label="Схема разбора пакета участка в vector-fengshui-bazi">
+  <defs>
+    <marker id="a-mut" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/>
+    </marker>
+    <marker id="a-clay" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--clay)"/>
+    </marker>
+  </defs>
+
+  <g class="zone">
+    <rect x="36" y="96" width="330" height="880"/>
+    <text class="ztitle" x="56" y="124">Вход</text>
+    <text class="zsub" x="56" y="142">то, что пришло из geo-site</text>
+  </g>
+  <g class="zone">
+    <rect x="392" y="96" width="726" height="880"/>
+    <text class="ztitle" x="412" y="124">Разбор</text>
+    <text class="zsub" x="412" y="142">scripts/landform.py · один проход, без вердиктов</text>
+  </g>
+  <g class="zone">
+    <rect x="1144" y="96" width="420" height="440"/>
+    <text class="ztitle" x="1164" y="124">Выход</text>
+    <text class="zsub" x="1164" y="142">отчёт и данные для него</text>
+  </g>
+  <g class="zone">
+    <rect x="1144" y="556" width="420" height="420"/>
+    <text class="ztitle" x="1164" y="584">Проверки</text>
+    <text class="zsub" x="1164" y="602">CI · якоря · сторож версий</text>
+  </g>
+
+  <!-- вход -->
+  <g class="node store" id="n-pack" data-node="pack">
+    <rect x="60" y="180" width="282" height="96"/>
+    <text class="k" x="78" y="204">site_pack/1</text>
+    <text class="t" x="78" y="226">site_pack.json</text>
+    <text class="m" x="78" y="245">24 сектора · вода · климат</text>
+    <text class="m" x="78" y="262">hydro · quality.warnings</text>
+  </g>
+  <g class="node store" id="n-fixture" data-node="fixture">
+    <rect x="60" y="292" width="282" height="86"/>
+    <text class="k" x="78" y="316">tests/fixtures</text>
+    <text class="t" x="78" y="338">лондонский пакет</text>
+    <text class="m" x="78" y="357">вода 6.3.1 · климат 1.0.0</text>
+    <text class="m" x="78" y="372">тот же, что в geo-site</text>
+  </g>
+  <g class="node gate" id="n-versions" data-node="versions">
+    <rect x="60" y="394" width="282" height="120"/>
+    <text class="k" x="78" y="418">врата</text>
+    <text class="t" x="78" y="440">check_pack_versions</text>
+    <text class="m" x="78" y="459">water ≥ 6.1.0 · terrain ≥ 2.0.0</text>
+    <text class="m" x="78" y="475">pack ≥ 1.2.0 · climate ≥ 1.0.0</text>
+    <text class="m" x="78" y="494">старое → stale_algo, не тишина</text>
+  </g>
+  <g class="node gate" id="n-schema" data-node="schema">
+    <rect x="60" y="530" width="282" height="86"/>
+    <text class="k" x="78" y="554">схема</text>
+    <text class="t" x="78" y="576">не site_pack/1</text>
+    <text class="m" x="78" y="595">отказ с причиной,</text>
+    <text class="m" x="78" y="610">а не «попробуем разобрать»</text>
+  </g>
+  <g class="node calc" id="n-cli" data-node="cli">
+    <rect x="60" y="632" width="282" height="86"/>
+    <text class="k" x="78" y="656">команда</text>
+    <text class="t" x="78" y="678">landform --pack</text>
+    <text class="m" x="78" y="697">--json · --year · --tz</text>
+    <text class="m" x="78" y="712">markdown или данные</text>
+  </g>
+
+  <!-- разбор -->
+  <g class="node calc" id="n-data" data-node="data">
+    <rect x="420" y="176" width="330" height="100"/>
+    <text class="k" x="438" y="200">landform_data</text>
+    <text class="t" x="438" y="222">разбор пакета</text>
+    <text class="m" x="438" y="241">читает поля, не считает заново</text>
+    <text class="m" x="438" y="258">чего нет — в оговорки, не в догадку</text>
+  </g>
+  <g class="node calc" id="n-orient" data-node="orient">
+    <rect x="786" y="176" width="310" height="100"/>
+    <text class="k" x="804" y="200">ось</text>
+    <text class="t" x="804" y="222">ориентация</text>
+    <text class="m" x="804" y="241">истинный и компасный азимут</text>
+    <text class="m" x="804" y="258">источник и уверенность</text>
+  </g>
+  <g class="node calc" id="n-terrain" data-node="terrain">
+    <rect x="420" y="300" width="330" height="100"/>
+    <text class="k" x="438" y="324">форма</text>
+    <text class="t" x="438" y="346">рельеф и четыре духа</text>
+    <text class="m" x="438" y="365">черепаха · птица · дракон · тигр</text>
+    <text class="m" x="438" y="382">гора за спиной выше фасада?</text>
+  </g>
+  <g class="node calc" id="n-water" data-node="water">
+    <rect x="786" y="300" width="310" height="100"/>
+    <text class="k" x="804" y="324">вода</text>
+    <text class="t" x="804" y="346">вода и врата</text>
+    <text class="m" x="804" y="365">ближайшая · слияния · петля</text>
+    <text class="m" x="804" y="382">暗水 · порядок реки · расход</text>
+  </g>
+  <g class="node calc" id="n-climate" data-node="climate">
+    <rect x="420" y="424" width="330" height="100"/>
+    <text class="k" x="438" y="448">климат</text>
+    <text class="t" x="438" y="470">склонение и ветер</text>
+    <text class="m" x="438" y="489">компас на месте ≠ карта</text>
+    <text class="m" x="438" y="506">凹风: ветер в фасад</text>
+  </g>
+  <g class="node calc" id="n-flying" data-node="flying">
+    <rect x="786" y="424" width="310" height="100"/>
+    <text class="k" x="804" y="448">звёзды</text>
+    <text class="t" x="804" y="470">летящие звёзды</text>
+    <text class="m" x="804" y="489">период по году · год дома</text>
+    <text class="m" x="804" y="506">нет года → оговорка, не «средний»</text>
+  </g>
+  <g class="node calc" id="n-checks" data-node="checks">
+    <rect x="420" y="548" width="676" height="96"/>
+    <text class="k" x="438" y="572">проверки</text>
+    <text class="t" x="438" y="594">26 проверок в одном отчёте</text>
+    <text class="m" x="438" y="613">13 кодов: ORIENT · SPIRIT · VEIN · WATER · HIDDEN · RING · GATE · SITE ·</text>
+    <text class="m" x="438" y="629">FORMAT · YEAR · FLYING · MAGNETIC · WIND — каждая с каноном и объяснением</text>
+  </g>
+  <g class="node calc" id="n-report" data-node="report">
+    <rect x="420" y="672" width="330" height="100"/>
+    <text class="k" x="438" y="696">текст</text>
+    <text class="t" x="438" y="718">landform_markdown</text>
+    <text class="m" x="438" y="737">разделы по порядку разбора</text>
+    <text class="m" x="438" y="754">числа рядом со смыслом</text>
+  </g>
+  <g class="node out" id="n-json" data-node="json">
+    <rect x="786" y="672" width="310" height="100"/>
+    <text class="k" x="804" y="696">данные</text>
+    <text class="t" x="804" y="718">--json</text>
+    <text class="m" x="804" y="737">checks · warnings · climate</text>
+    <text class="m" x="804" y="754">то же, что в тексте, без прозы</text>
+  </g>
+  <g class="node out" id="n-warn" data-node="warn">
+    <rect x="420" y="796" width="676" height="92"/>
+    <text class="k" x="438" y="820">оговорки</text>
+    <text class="t" x="438" y="842">что не посчитано — сказано вслух</text>
+    <text class="m" x="438" y="861">например: «ветер региональный, сетка ERA5 9–30 км»; «год не задан — период не выбирался»</text>
+    <text class="m" x="438" y="878">или «участок вне петли — положение measured, но не решает»</text>
+  </g>
+
+  <!-- выход -->
+  <g class="node out" id="n-md" data-node="md">
+    <rect x="1172" y="180" width="364" height="96"/>
+    <text class="k" x="1190" y="204">отчёт</text>
+    <text class="t" x="1190" y="226">landform.md</text>
+    <text class="m" x="1190" y="245">ориентация · форма · вода · климат</text>
+    <text class="m" x="1190" y="262">звёзды · проверки · оговорки</text>
+  </g>
+  <g class="node out" id="n-data-out" data-node="data-out">
+    <rect x="1172" y="300" width="364" height="96"/>
+    <text class="k" x="1190" y="324">данные</text>
+    <text class="t" x="1190" y="346">landform.json</text>
+    <text class="m" x="1190" y="365">ключи: orientation · climate · vein</text>
+    <text class="m" x="1190" y="382">spirits · water · checks · warnings</text>
+  </g>
+  <g class="node out" id="n-summary" data-node="summary">
+    <rect x="1172" y="420" width="364" height="80"/>
+    <text class="k" x="1190" y="444">итог</text>
+    <text class="t" x="1190" y="466">summary и attribution</text>
+    <text class="m" x="1190" y="485">версии пакета · источники</text>
+  </g>
+
+  <!-- проверки -->
+  <g class="node gate" id="n-landform-tests" data-node="landform-tests">
+    <rect x="1172" y="640" width="364" height="96"/>
+    <text class="k" x="1190" y="664">scripts/test_landform.py</text>
+    <text class="t" x="1190" y="686">40/40 проверок</text>
+    <text class="m" x="1190" y="705">форма · вода · петля · склонение</text>
+    <text class="m" x="1190" y="722">凹风 · stale_algo · чужой год</text>
+  </g>
+  <g class="node gate" id="n-anchors" data-node="anchors">
+    <rect x="1172" y="756" width="364" height="96"/>
+    <text class="k" x="1190" y="780">scripts/test_anchors.py</text>
+    <text class="t" x="1190" y="802">34/34 якорей</text>
+    <text class="m" x="1190" y="821">канонические числа не плывут</text>
+    <text class="m" x="1190" y="838">при правках текста отчёта</text>
+  </g>
+  <g class="node gate" id="n-ci" data-node="ci">
+    <rect x="1172" y="868" width="364" height="70"/>
+    <text class="k" x="1190" y="892">CI</text>
+    <text class="t" x="1190" y="914">test на каждый PR</text>
+    <text class="m" x="1190" y="931">пакет-фикстура → landform → проверки</text>
+  </g>
+
+  <!-- рёбра -->
+  <path class="edge" id="e-pack-versions" d="M201,278 L201,392"/>
+  <path class="edge" id="e-fixture-versions" d="M201,380 L201,392"/>
+  <path class="edge" id="e-versions-schema" d="M201,516 L201,528"/>
+  <path class="edge hub" id="e-schema-cli" d="M201,618 L201,630"/>
+  <path class="edge hub" id="e-cli-data" d="M344,674 C380,674 392,260 418,236"/>
+  <path class="edge" id="e-data-orient" d="M752,226 L784,226"/>
+  <path class="edge" id="e-data-terrain" d="M585,278 L585,298"/>
+  <path class="edge" id="e-data-water" d="M752,250 C770,250 776,340 784,340"/>
+  <path class="edge" id="e-orient-climate" d="M941,278 L941,300"/>
+  <path class="edge" id="e-terrain-climate" d="M585,402 L585,422"/>
+  <path class="edge hub" id="e-water-checks" d="M784,390 C770,470 760,520 740,546"/>
+  <path class="edge hub" id="e-climate-checks" d="M585,526 L585,546"/>
+  <path class="edge hub" id="e-orient-checks" d="M941,300 C941,420 700,500 620,546"/>
+  <path class="edge" id="e-checks-report" d="M585,646 L585,670"/>
+  <path class="edge" id="e-checks-json" d="M941,646 L941,670"/>
+  <path class="edge" id="e-report-warn" d="M585,774 L585,794"/>
+  <path class="edge" id="e-report-md" d="M752,700 C800,700 1100,300 1170,240"/>
+  <path class="edge" id="e-json-dataout" d="M1098,700 C1140,700 1150,380 1170,350"/>
+  <path class="edge" id="e-warn-summary" d="M1098,842 C1140,842 1150,480 1170,462"/>
+  <path class="edge" id="e-md-tests" d="M1354,278 L1354,638"/>
+  <path class="edge" id="e-tests-anchors" d="M1354,738 L1354,754"/>
+  <path class="edge" id="e-anchors-ci" d="M1354,854 L1354,866"/>
+
+  <text class="elbl" data-edge="e-cli-data" x="352" y="248">пакет</text>
+  <text class="elbl" data-edge="e-data-orient" x="756" y="218">ось</text>
+  <text class="elbl" data-edge="e-data-water" x="700" y="330">вода</text>
+  <text class="elbl" data-edge="e-climate-checks" x="592" y="540">климат</text>
+  <text class="elbl" data-edge="e-report-md" x="1112" y="300">текст</text>
+  <text class="elbl" data-edge="e-json-dataout" x="1112" y="380">данные</text>
+</svg>
+
+<div class="card" id="flowcap">
+  <div class="fname" id="flowcap-name"></div>
+  <div class="fcount" id="flowcap-count"></div>
+</div>
+
+<div class="card" id="detail">
+  <button class="close" id="detailClose" title="Закрыть">×</button>
+  <h3>Выберите блок</h3>
+  <div class="meta">клик по схеме слева</div>
+  <p>Пакет из geo-site → врата версий → разбор (форма, вода, климат, звёзды) → проверки → отчёт.
+     Чипы сверху показывают, что происходит с полным разбором, без года, со старым пакетом и в CI.</p>
+</div>
+<div class="src">docs/diagram.html · vector-fengshui-bazi</div>
+</div>
+
+<script>
+const DETAIL = {
+  pack: {
+    title: "site_pack.json", meta: "site_pack/1 · из vector-geo-site",
+    body: "Единственный вход: навык ничего не скачивает и не считает рельеф заново. Всё, что в отчёте есть, взято из пакета — поэтому отчёт можно проверить по файлу.",
+    facts: ["пример Лондона: 24 сектора, 42 объекта воды, вода 6.3.1"]
+  },
+  fixture: {
+    title: "лондонский пакет", meta: "tests/fixtures/london-city-site_pack.json",
+    body: "Тот же пакет, что в примерах geo-site, положен в репозиторий навыка. CI гоняет на нём полный разбор — так ловится расхождение форматов между репозиториями.",
+    facts: ["обновляется вручную после смены версии воды"]
+  },
+  versions: {
+    title: "check_pack_versions", meta: "MIN_ALGO",
+    body: "Сторож версий: water ≥ 6.1.0 (до неё слияния считались по куску русла), terrain ≥ 2.0.0, pack ≥ 1.2.0, climate ≥ 1.0.0 (без неё нет склонения и ветра). Старый пакет даёт stale_algo, а не молча пустой раздел.",
+    facts: ["stale_algo попадает в warnings и в отчёт"]
+  },
+  schema: {
+    title: "чужая схема", meta: "отказ",
+    body: "Если в пакете не site_pack/1, навык отказывается разбирать: молчаливая попытка прочитать чужой формат даёт правдоподобный бред.",
+    facts: []
+  },
+  cli: {
+    title: "landform --pack", meta: "scripts/fengshui_bazi_calc.py",
+    body: "Одна команда: markdown для человека или --json для машины. Год, часовой пояс и точка отсчёта — параметры, а не догадки.",
+    facts: ["--year задаёт период; без года период не выбирается"]
+  },
+  data: {
+    title: "landform_data", meta: "landform.py · 455 строк",
+    body: "Разбор пакета по разделам. Функция ничего не измеряет заново — она читает и связывает: если поля нет, это оговорка, а не повод посчитать «по-своему».",
+    facts: ["ключи результата: orientation, climate, vein, spirits, water, checks, warnings"]
+  },
+  orient: {
+    title: "ориентация", meta: "ORIENT",
+    body: "Азимут фасада по истинному северу и по компасу, источник и уверенность. Слабая уверенность — отдельная проверка ORIENT-WEAK, а не тихое «пусть будет».",
+    facts: ["истинный 135.0° → компасный 133.8° при склонении +1.24°"]
+  },
+  terrain: {
+    title: "рельеф и духи", meta: "SPIRIT · VEIN",
+    body: "Четыре духа считаются по секторам горизонта: черепаха за спиной, птица спереди, дракон слева, тигр справа. Сравнение «гора за спиной выше фасада» — проверка формы, а не оценка красоты.",
+    facts: ["Лондон: черепаха +112.7 против птицы +62.1"]
+  },
+  water: {
+    title: "вода и врата", meta: "WATER · HIDDEN · RING · GATE",
+    body: "Ближайшая вода, слияния (по реке, а не по куску русла), петля с положением участка, скрытая вода 暗水 и порядок реки. Доля воды по секторам идёт из пакета, а не пересчитывается.",
+    facts: ["Fleet 404.3 м, скрыто 93 % → visible false", "Темза: порядок 5, 89.9 м³/с"]
+  },
+  climate: {
+    title: "склонение и ветер", meta: "MAGNETIC · WIND",
+    body: "Компасный азимут рядом с истинным: человек с компасом на месте получает другое число. Ветер — преобладающее направление за 10 лет; если гора ветра совпала с горой фасада, пишется 凹风.",
+    facts: ["235.8° (申), 3.97 м/с, зима 234.1° / лето 241.0°"]
+  },
+  flying: {
+    title: "летящие звёзды", meta: "FLYING · YEAR",
+    body: "Период выбирается по году дома, год — по дате переезда. Нет года — нет периода: YEAR-GAP фиксирует разрыв, а не подставляет текущий.",
+    facts: ["2018 → период 8; текущий период — 9 (2024–2043)"]
+  },
+  checks: {
+    title: "проверки", meta: "13 кодов · 26 в отчёте",
+    body: "Каждая проверка несёт код, канон и объяснение: ORIENT, SPIRIT-*, VEIN, WATER-*, HIDDEN, RING-*, GATE-*, SITE, FORMAT-CONFLICT, YEAR-*, FLYING, MAGNETIC, WIND. Проверка — это утверждение о данных, а не оценка «хорошо/плохо».",
+    facts: ["FORMAT-CONFLICT: форма противоречит воде за спиной"]
+  },
+  report: {
+    title: "landform_markdown", meta: "текст отчёта",
+    body: "Разделы идут в порядке разбора, рядом с каждым числом — откуда оно. Умолчаний нет: если что-то не посчитано, это написано в оговорках.",
+    facts: ["3 оговорки на лондонском пакете"]
+  },
+  json: {
+    title: "--json", meta: "данные отчёта",
+    body: "То же, что в тексте, но без прозы: проверки, оговорки, климат, версии. Используется в тестах и во внешних сверках.",
+    facts: []
+  },
+  warn: {
+    title: "оговорки", meta: "warnings",
+    body: "Место, где инструмент признаётся в незнании: региональный ветер, отсутствие года, участок вне петли, старые версии пакета. Оговорка не отменяет разбор — она говорит, чему в нём нельзя верить без проверки.",
+    facts: []
+  },
+  md: {
+    title: "landform.md", meta: "отчёт",
+    body: "Читается человеком: ориентация, форма, вода, климат, звёзды, проверки, оговорки. По нему можно спорить — все числа с источниками.",
+    facts: []
+  },
+  "data-out": {
+    title: "landform.json", meta: "данные",
+    body: "Машинная форма отчёта: те же проверки и оговорки. По ней сторонний агент может сверить вывод, не разбирая прозу.",
+    facts: []
+  },
+  summary: {
+    title: "summary и attribution", meta: "итог",
+    body: "Версии пакета и источники — чтобы через полгода было видно, на чём построен отчёт.",
+    facts: []
+  },
+  "landform-tests": {
+    title: "test_landform.py", meta: "40/40",
+    body: "Проверки поведения: форма против воды, петля и её положение, склонение, ветер, 凹风, stale_algo, чужой год, отсутствие климата.",
+    facts: ["8 проверок добавлено вместе с этапом 4"]
+  },
+  anchors: {
+    title: "test_anchors.py", meta: "34/34",
+    body: "Якоря канонических чисел: если правка текста сдвинет числа или формулировки, тест это покажет.",
+    facts: []
+  },
+  ci: {
+    title: "CI", meta: "PR → test",
+    body: "На каждый PR: пакет-фикстура → полный разбор → landform-тесты и якоря. main защищён, слияние только после зелёного прогона.",
+    facts: []
+  }
+};
+
+const FLOWS = {
+  all: { name: "Всё", nodes: [], edges: [] },
+  report: {
+    name: "Полный разбор: пакет → врата → форма, вода, климат, звёзды → отчёт",
+    nodes: ["pack","versions","cli","data","orient","terrain","water","climate","flying","checks","report","json","warn","md","data-out","summary"],
+    edges: ["e-pack-versions","e-cli-data","e-data-orient","e-data-terrain","e-data-water","e-orient-climate","e-terrain-climate","e-water-checks","e-climate-checks","e-orient-checks","e-checks-report","e-checks-json","e-report-warn","e-report-md","e-json-dataout","e-warn-summary"]
+  },
+  nogear: {
+    name: "Без года: период не выбирается, YEAR-GAP в оговорках",
+    nodes: ["pack","cli","data","flying","checks","report","warn"],
+    edges: ["e-cli-data","e-checks-report","e-report-warn"]
+  },
+  stale: {
+    name: "Старый пакет: stale_algo вместо пустого раздела",
+    nodes: ["pack","versions","schema","cli","warn","report"],
+    edges: ["e-pack-versions","e-versions-schema","e-schema-cli","e-cli-data","e-report-warn"]
+  },
+  ci: {
+    name: "Фикстура в CI: пакет → landform → проверки → якоря",
+    nodes: ["fixture","versions","cli","data","checks","landform-tests","anchors","ci"],
+    edges: ["e-fixture-versions","e-schema-cli","e-cli-data","e-md-tests","e-tests-anchors","e-anchors-ci"]
+  }
+};
+
+const stage = document.getElementById("stage");
+const detail = document.getElementById("detail");
+const flowcap = document.getElementById("flowcap");
+
+function hint() {
+  detail.innerHTML = `<button class="close" id="detailClose" title="Закрыть">×</button>
+    <h3>Выберите блок</h3><div class="meta">клик по схеме слева</div>
+    <p>Пакет из geo-site → врата версий → разбор → проверки → отчёт. Чипы сверху показывают маршруты.</p>`;
+  bindClose();
+}
+
+function bindClose() {
+  const btn = document.getElementById("detailClose");
+  if (!btn) return;
+  btn.onclick = (ev) => {
+    ev.stopPropagation();
+    document.querySelectorAll(".node.sel").forEach(n => n.classList.remove("sel"));
+    hint();
+  };
+}
+
+function selectNode(id) {
+  const info = DETAIL[id];
+  if (!info) return;
+  document.querySelectorAll(".node.sel").forEach(n => n.classList.remove("sel"));
+  const node = document.getElementById("n-" + id);
+  if (node) node.classList.add("sel");
+  const facts = (info.facts || []).map(f => `<li>${f}</li>`).join("");
+  detail.innerHTML = `<button class="close" id="detailClose" title="Закрыть">×</button>
+    <h3>${info.title}</h3><div class="meta">${info.meta}</div>
+    <p>${info.body}</p>${facts ? `<ul>${facts}</ul>` : ""}`;
+  bindClose();
+}
+
+document.querySelectorAll(".node").forEach(node => {
+  node.addEventListener("click", () => selectNode(node.dataset.node));
+});
+
+function setFlow(key) {
+  const flow = FLOWS[key] || FLOWS.all;
+  stage.classList.toggle("flowing", key !== "all");
+  document.querySelectorAll(".edge").forEach(e => e.classList.remove("lit"));
+  document.querySelectorAll(".elbl").forEach(e => e.classList.remove("lit"));
+  document.querySelectorAll(".node").forEach(n => n.classList.remove("lit"));
+  if (key !== "all") {
+    flow.edges.forEach(id => { const el = document.getElementById(id); if (el) el.classList.add("lit"); });
+    flow.nodes.forEach(id => { const el = document.getElementById("n-" + id); if (el) el.classList.add("lit"); });
+    document.querySelectorAll(".edge.lit").forEach(e => {
+      const lbl = [...document.querySelectorAll(".elbl")].find(l => l.dataset.edge === e.id);
+      if (lbl) lbl.classList.add("lit");
+    });
+    document.getElementById("flowcap-name").textContent = flow.name;
+    document.getElementById("flowcap-count").textContent =
+      flow.nodes.length + " блоков · " + flow.edges.length + " связей";
+    flowcap.classList.add("show");
+  } else {
+    flowcap.classList.remove("show");
+  }
+  document.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c.dataset.flow === key));
+}
+
+document.querySelectorAll(".chip").forEach(chip => {
+  chip.addEventListener("click", () => setFlow(chip.dataset.flow));
+});
+
+document.getElementById("themeToggle").addEventListener("click", () => {
+  const dark = document.documentElement.classList.toggle("dark");
+  localStorage.setItem("theme", dark ? "dark" : "light");
+});
+
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.getElementById("detailClose")?.click(); });
+
+bindClose();
+selectNode("data");
+setFlow("all");
+</script>
+</body>
+</html>
