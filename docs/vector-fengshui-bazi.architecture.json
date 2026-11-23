@@ -1,0 +1,236 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "vector-fengshui-bazi — от пакета к отчёту",
+    "output": "docs/vector-fengshui-bazi.architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "report-path",
+        "label": "Путь разбора",
+        "focus": [
+          "geo_site",
+          "site_pack",
+          "gates",
+          "landform",
+          "checks",
+          "report"
+        ],
+        "note": "Пакет из geo-site проходит врата версий и разбирается в отчёт: форма, вода, климат, звёзды и проверки."
+      },
+      {
+        "id": "gates",
+        "label": "Врата версий",
+        "focus": [
+          "site_pack",
+          "gates",
+          "landform"
+        ],
+        "note": "Старый пакет даёт stale_algo, чужая схема — отказ: молчаливый разбор чужого формата даёт правдоподобный бред."
+      },
+      {
+        "id": "checks",
+        "label": "Проверки и CI",
+        "focus": [
+          "site_pack",
+          "landform",
+          "checks",
+          "report"
+        ],
+        "note": "13 кодов проверок в отчёте, 40/40 поведенческих тестов и 34/34 якоря канонических чисел на фикстуре."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "geo_site",
+      "type": "external",
+      "label": "vector-geo-site",
+      "sublabel": "измерение участка",
+      "pos": [
+        40,
+        120
+      ],
+      "size": [
+        156,
+        64
+      ]
+    },
+    {
+      "id": "site_pack",
+      "type": "database",
+      "label": "site_pack.json",
+      "sublabel": "24 сектора, вода, климат",
+      "pos": [
+        244,
+        120
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "gates",
+      "type": "security",
+      "label": "врата версий",
+      "sublabel": "MIN_ALGO и схема",
+      "pos": [
+        462,
+        120
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "landform",
+      "type": "backend",
+      "label": "landform",
+      "sublabel": "ось, вода, звёзды",
+      "pos": [
+        660,
+        112
+      ],
+      "size": [
+        160,
+        76
+      ]
+    },
+    {
+      "id": "checks",
+      "type": "security",
+      "label": "проверки",
+      "sublabel": "13 кодов, 26 в отчёте",
+      "pos": [
+        660,
+        236
+      ],
+      "size": [
+        160,
+        72
+      ]
+    },
+    {
+      "id": "report",
+      "type": "frontend",
+      "label": "отчёт",
+      "sublabel": "landform.md",
+      "pos": [
+        462,
+        236
+      ],
+      "size": [
+        150,
+        72
+      ]
+    },
+    {
+      "id": "json",
+      "type": "database",
+      "label": "--json",
+      "sublabel": "checks, warnings",
+      "pos": [
+        244,
+        236
+      ],
+      "size": [
+        170,
+        72
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "geo-pack",
+      "from": "geo_site",
+      "to": "site_pack",
+      "label": "site_pack/1",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [
+        220,
+        198
+      ]
+    },
+    {
+      "id": "pack-gates",
+      "from": "site_pack",
+      "to": "gates",
+      "label": "версии алгоритмов",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [
+        438,
+        198
+      ]
+    },
+    {
+      "id": "gates-landform",
+      "from": "gates",
+      "to": "landform",
+      "label": "MIN_ALGO",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "landform-checks",
+      "from": "landform",
+      "to": "checks",
+      "label": "13 кодов проверок",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [
+        740,
+        202
+      ]
+    },
+    {
+      "id": "checks-report",
+      "from": "checks",
+      "to": "report",
+      "label": "вердикты и канон",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelAt": [
+        636,
+        322
+      ]
+    },
+    {
+      "id": "report-json",
+      "from": "report",
+      "to": "json",
+      "label": "те же данные без прозы",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelAt": [
+        438,
+        322
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Что именно проверяет врата",
+      "items": [
+        "water ≥ 6.1.0: до неё слияния считались по куску русла, а не по реке",
+        "terrain ≥ 2.0.0, pack ≥ 1.2.0, climate ≥ 1.0.0 (склонение и ветер)",
+        "старый пакет → stale_algo в оговорках, чужая схема → отказ с причиной"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Чего отчёт не делает",
+      "items": [
+        "не измеряет заново: все числа берутся из пакета, отчёт можно проверить по файлу",
+        "не выносит вердиктов: проверка — утверждение о данных с каноном",
+        "чего не посчитали — в оговорках: ветер региональный, год не задан, участок вне петли",
+        "тесты и CI: 40/40 поведенческих проверок и 34/34 якоря на лондонской фикстуре"
+      ]
+    }
+  ]
+}

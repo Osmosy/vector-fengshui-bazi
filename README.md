@@ -47,11 +47,16 @@
 
 ## Живая схема
 
-Смотреть онлайн: https://osmosy.github.io/vector-fengshui-bazi/docs/diagram.html
+Смотреть онлайн: https://osmosy.github.io/vector-fengshui-bazi/docs/vector-fengshui-bazi.architecture.html
 
-`docs/diagram.html` — схема разбора пакета: врата версий → форма, вода, климат, звёзды →
-проверки → отчёт. Открывается из файла без сети; клик по блоку объясняет, откуда берутся числа,
-чипы показывают, что меняется без года, со старым пакетом и в CI.
+`docs/vector-fengshui-bazi.architecture.html` — интерактивная схема (рендерер archify, как в
+остальных репозиториях экосистемы): темы, поиск, трассировка связей, guided views, экспорт.
+Спецификация — `docs/vector-fengshui-bazi.architecture.json`; пересборка:
+
+```bash
+node ~/.hermes/skills/archify/bin/archify.mjs deliver architecture \
+  docs/vector-fengshui-bazi.architecture.json docs/vector-fengshui-bazi.architecture.html --quality showcase --json
+```
 
 ## Установка
 
