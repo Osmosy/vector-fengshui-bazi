@@ -27,7 +27,8 @@ MOUNTAIN_RU = {
 
 # R8: минимальные версии, с которыми навык умеет читать пакет
 MIN_SCHEMA = "site_pack/1"
-MIN_ALGO = {"water": (6, 1, 0), "terrain": (2, 0, 0), "pack": (1, 2, 0)}
+MIN_ALGO = {"water": (6, 1, 0), "terrain": (2, 0, 0), "pack": (1, 2, 0),
+            "climate": (1, 0, 0)}
 CURRENT_PERIOD = (9, 2024, 2043)
 
 SPIRIT_RU = {"tortoise": "черепаха (спина)", "bird": "птица (фасад)",
@@ -132,6 +133,39 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
 
     def check(code: str, text: str, confidence: str = "high", canon: str | None = None):
         checks.append({"code": code, "text": text, "confidence": confidence, "canon": canon})
+
+    # --- склонение и ветер (этап 4) ---
+    climate = {}
+    declination = _num(orientation.get("declination_deg"))
+    if declination is not None:
+        climate["declination_deg"] = declination
+        climate["facing_mag_deg"] = _num(orientation.get("facing_mag_deg"))
+        check("MAGNETIC", "истинный азимут %s°, компасный %s° (склонение %s°%s)" % (
+            orientation.get("facing_true_deg"), climate["facing_mag_deg"],
+            abs(declination), " в.д." if declination >= 0 else " з.д."),
+            canon="磁偏角 — компас ≠ истинный север")
+    exposure = pack.get("exposure") or {}
+    wind = {k: exposure.get(k) for k in (
+        "wind_prevailing_deg", "wind_prevailing_mountain", "wind_speed_ms",
+        "wind_calm_share", "wind_days", "wind_seasonal", "wind_source")
+        if exposure.get(k) is not None}
+    if wind:
+        climate["wind"] = wind
+        seasonal = wind.get("wind_seasonal") or {}
+        winter = (seasonal.get("winter") or {}).get("prevailing_from_deg")
+        summer = (seasonal.get("summer") or {}).get("prevailing_from_deg")
+        check("WIND", "преобладающий ветер: %s (%s°), %s м/с, штилей %s%s" % (
+            _mountain_ru(wind.get("wind_prevailing_mountain")), wind.get("wind_prevailing_deg"),
+            wind.get("wind_speed_ms"), wind.get("wind_calm_share"),
+            ("; зима %s°, лето %s°" % (winter, summer)) if winter is not None and summer is not None else ""),
+            canon="風 — 凹风 (ветер в фасад) считается по горе ветра против горы фасада")
+        if wind.get("wind_prevailing_mountain") and orientation.get("facing_mountain"):
+            if wind["wind_prevailing_mountain"] == orientation["facing_mountain"]:
+                warnings.append("凹风: преобладающий ветер дует в фасад (гора ветра совпадает "
+                                "с горой фасада) — фасад не защищён")
+    elif pack.get("algo", {}).get("climate"):
+        warnings.append("ветер: пакет собран с climate, но поля ветра пусты — смотрите "
+                        "quality.warnings пакета")
 
     # --- ось ---
     source = orientation.get("source")
@@ -322,6 +356,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         "algo": pack.get("algo"),
         "site": pack.get("site"),
         "orientation": orientation,
+        "climate": climate,
         "chart_year": pack.get("chart_year"),
         "chart": chart,
         "chart_error": chart_error,
@@ -358,6 +393,15 @@ def landform_markdown(data: dict) -> str:
                                                 _mountain_ru(orientation.get("sitting_mountain"))))
     lines.append("- азимут: %s°, источник: %s, уверенность: %s" % (
         orientation.get("facing_true_deg"), orientation.get("source"), orientation.get("confidence")))
+    climate = data.get("climate") or {}
+    if climate.get("declination_deg") is not None:
+        lines.append("- компасный азимут: %s° (склонение %s°)" % (
+            climate.get("facing_mag_deg"), climate.get("declination_deg")))
+    wind = climate.get("wind") or {}
+    if wind:
+        lines.append("- ветер: %s (%s°), %s м/с, дней в выборке %s" % (
+            _mountain_ru(wind.get("wind_prevailing_mountain")), wind.get("wind_prevailing_deg"),
+            wind.get("wind_speed_ms"), wind.get("wind_days")))
     chart = data.get("chart")
     if chart:
         lines.append("- период %s, формат: %s" % (chart.get("period"), chart.get("format")))

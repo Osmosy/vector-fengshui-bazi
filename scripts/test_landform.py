@@ -177,6 +177,43 @@ def run():
     check("период 8 для 2004", data3["chart"]["period"], 8)
 
 
+
+    # 11. Этап 4: склонение и ветер
+    with_climate = base_pack()
+    with_climate["algo"]["climate"] = "1.0.0"
+    with_climate["orientation"].update({"declination_deg": 1.238, "facing_mag_deg": 133.8})
+    with_climate["exposure"] = {"wind_prevailing_deg": 235.8, "wind_prevailing_mountain": "申",
+                                "wind_speed_ms": 3.97, "wind_calm_share": 0.002, "wind_days": 3653,
+                                "wind_seasonal": {"winter": {"prevailing_from_deg": 234.1},
+                                                  "summer": {"prevailing_from_deg": 241.0}}}
+    data_cl = L.landform_data(with_climate, feixing_fn=feixing)
+    check("склонение: компасный азимут", data_cl["climate"].get("facing_mag_deg"), 133.8)
+    check("склонение: проверка MAGNETIC",
+          any(c["code"] == "MAGNETIC" for c in data_cl["checks"]), True)
+    check("ветер: проверка WIND", any(c["code"] == "WIND" for c in data_cl["checks"]), True)
+    check("ветер: гора в данных", data_cl["climate"]["wind"].get("wind_prevailing_mountain"), "申")
+
+    # 11b. 凹风: ветер дует в фасад — гора ветра совпала с горой фасада
+    into_face = copy.deepcopy(with_climate)
+    into_face["exposure"]["wind_prevailing_mountain"] = into_face["orientation"]["facing_mountain"]
+    data_if = L.landform_data(into_face, feixing_fn=feixing)
+    check("凹风: предупреждение о ветре в фасад",
+          any("凹风" in w for w in data_if["warnings"]), True)
+
+    # 11c. Пакет без климата: поля пусты, но отчёта это не ломает
+    no_climate = base_pack()
+    data_nc = L.landform_data(no_climate, feixing_fn=feixing)
+    check("без климата: пустой блок", data_nc["climate"], {})
+    check("без климата: нет проверки WIND",
+          any(c["code"] == "WIND" for c in data_nc["checks"]), False)
+
+    # 11d. Старый пакет климата даёт stale_algo
+    stale = base_pack()
+    stale["algo"]["climate"] = "0.9.0"
+    check("stale_algo: климат",
+          any("climate" in w for w in L.check_pack_versions(stale)), True)
+
+
 if __name__ == "__main__":
     run()
     failed = [c for c in CHECKS if not c[1]]
