@@ -1,7 +1,7 @@
 # Фикстуры
 
 `london-city-site_pack.json` — копия `examples/london-city/site_pack.json` из
-`Osmosy/vector-geo-site` (пакет `site_pack/1`, собран 23.11.2026, `algo.water 6.1.0`). Нужна, чтобы CI навыка
+`Osmosy/vector-geo-site` (пакет `site_pack/1`, собран 23.11.2026, `algo.water 6.1.1`). Нужна, чтобы CI навыка
 проверял `landform` на настоящем пакете, а не на синтетике.
 
 Копия обновляется вручную при смене схемы: расхождение версий ловит проверка в `landform`
