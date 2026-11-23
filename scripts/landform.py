@@ -27,7 +27,7 @@ MOUNTAIN_RU = {
 
 # R8: минимальные версии, с которыми навык умеет читать пакет
 MIN_SCHEMA = "site_pack/1"
-MIN_ALGO = {"water": (5, 0, 0), "terrain": (2, 0, 0), "pack": (1, 2, 0)}
+MIN_ALGO = {"water": (6, 1, 0), "terrain": (2, 0, 0), "pack": (1, 2, 0)}
 CURRENT_PERIOD = (9, 2024, 2043)
 
 SPIRIT_RU = {"tortoise": "черепаха (спина)", "bird": "птица (фасад)",
