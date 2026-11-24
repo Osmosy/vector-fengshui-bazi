@@ -48,6 +48,26 @@ def _num(value):
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
+AQUATIC_KINDS = {"river", "stream", "canal", "culvert"}
+
+# E-021: положение участка относительно петли — словами, а не кодом поля
+LOOP_POSITION_RU = {
+    "inside": "участок охвачен водой (玉帶)",
+    "outside_convex": "反弓: вода выгибается от участка",
+    "outside_concave": "участок с внешней стороны вогнутости петли",
+}
+
+
+def _is_area(item: dict) -> bool:
+    """Контур водоёма (E-018 в vector-geo-site): речных полей у него нет."""
+    return item.get("geom", "line") == "area"
+
+
+def _hidden_share(item: dict) -> float:
+    value = _num(item.get("hidden_share"))
+    return value if value is not None else 0.0
+
+
 def _mountain_ru(name: str | None) -> str:
     if not name:
         return "—"
@@ -248,9 +268,44 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
             vein.get("bends"), vein.get("saddles"), "да" if vein.get("alive") else "нет"),
             confidence="medium", canon="龍 — жила приходит к точке")
 
-    # --- вода ---
-    rivers = [w for w in water if w.get("kind") in {"river", "stream", "canal", "culvert"}]
-    for item in sorted(rivers, key=lambda w: w.get("nearest_m") or 1e9)[:5]:
+    # --- вода (R2 п. 4, E-019): каждый объект — ровно в одном разделе ---
+    # Вода делится на три раздела по данным пакета: видимые русла (來水/去水), подземные (暗水)
+    # и водоёмы. До 7.0.0 навык смотрел только на `kind` и показывал трубу и в 來水, и в 暗水.
+    courses = [w for w in water if w.get("kind") in AQUATIC_KINDS]
+    modern = any("geom" in w for w in water)
+    if modern:
+        areas = [w for w in water if _is_area(w)]
+        line_water = [w for w in courses if not _is_area(w)]
+        streaming = [w for w in line_water
+                     if w.get("visible") is not False and _hidden_share(w) < 0.8]
+        hidden = [w for w in line_water
+                  if w.get("visible") is False or _hidden_share(w) >= 0.8]
+    else:
+        # R8: пакет до water 7.0.0 — полей `geom` и `visible` нет; читаем по старой логике
+        # и говорим об этом прямо, а не делаем вид, что разделы проверены.
+        warnings.append("stale_algo: в пакете нет полей geom и visible — вода показана по "
+                        "старой логике; пересоберите пакет в vector-geo-site (water ≥ 7.0.0)")
+        areas = []
+        streaming = list(courses)
+        hidden = [w for w in water if w.get("kind") == "culvert"]
+    rivers = streaming
+
+    seen_ids: set[str] = set()
+
+    def _once(item: dict) -> bool:
+        """Каждый объект в отчёте ровно один раз: разделы не пересекаются по данным."""
+        key = str(item.get("id") or item.get("name") or "?")
+        if key in seen_ids:
+            return False
+        seen_ids.add(key)
+        return True
+
+    # 來水 / 去水 — только видимые русла
+    shown = 0
+    for item in sorted(streaming, key=lambda w: w.get("nearest_m") or 1e9):
+        if shown >= 5 or not _once(item):
+            continue
+        shown += 1
         name = item.get("name") or item.get("id")
         tid = item.get("tidal")
         tide_txt = "приливная" if tid is True else ("неприливная" if tid is False else "приливность неизвестна")
@@ -258,12 +313,25 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         loop = item.get("loop") or {}
         loop_txt = ""
         if loop:
-            loop_txt = ", петля (ratio %.1f%s)" % (_num(loop.get("ratio")) or 0,
-                                                   ", участок внутри" if loop.get("site_inside") else "")
+            ratio = _num(loop.get("ratio"))
+            position = LOOP_POSITION_RU.get(item.get("site_position") or loop.get("site_position") or "", "")
+            loop_conf = loop.get("confidence") or "unknown"
+            loop_txt = ", петля (ratio %s%s, уверенность %s)" % (
+                "%.2f" % ratio if ratio is not None else "?",
+                ", " + position if position else "", loop_conf)
+            if loop_conf == "low":
+                # E-021: пограничную петлю не выдаём за 玉帶 или 反弓 наверняка
+                warnings.append("%s: петля с запасом у порога (margin %s) — вывод о петле с оговоркой"
+                                % (name or "?", loop.get("margin")))
+        partial = ""
+        share = _hidden_share(item)
+        if modern and 0.2 <= share < 0.8:
+            partial = ", частично в трубе (%d %%), видимая часть — гора %s" % (
+                round(share * 100), _mountain_ru(item.get("out_mountain")))
         check("WATER-%s" % (name or "?"),
-              "%s: %s м, вход %s, выход %s, %s, %s%s" % (
+              "%s: %s м, вход %s, выход %s, %s, %s%s%s" % (
                   name, item.get("nearest_m"), _mountain_ru(item.get("in_mountain")),
-                  _mountain_ru(item.get("out_mountain")), bend, tide_txt, loop_txt),
+                  _mountain_ru(item.get("out_mountain")), bend, tide_txt, loop_txt, partial),
               confidence=item.get("flow_confidence") or "unknown", canon="水 — 來水 / 去水")
         mouth = item.get("water_mouth") or {}
         if mouth:
@@ -283,11 +351,39 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
                                 % (name, mouth.get("capped_sides")))
             check("GATE-%s" % (name or "?"), mouth_txt, confidence=mouth_conf, canon="水口")
 
-    # --- скрытая вода ---
-    hidden = [w for w in water if w.get("kind") == "culvert"]
-    if hidden:
-        names = ", ".join((w.get("name") or w.get("id") or "?") for w in hidden[:5])
-        check("HIDDEN", "скрытая вода в трубе: %s" % names, confidence="medium", canon="暗水")
+    # 暗水 — подземная вода, по строке на объект
+    shown = 0
+    for item in sorted(hidden, key=lambda w: w.get("nearest_m") or 1e9):
+        if shown >= 5 or not _once(item):
+            continue
+        shown += 1
+        name = item.get("name") or item.get("id")
+        outfall = item.get("culvert_outfall")
+        extra = ", выход на поверхность: %s" % _mountain_ru(outfall) if outfall else ""
+        mountain = item.get("nearest_mountain") or item.get("out_mountain")
+        check("HIDDEN-%s" % (name or "?"),
+              "%s: %s м, %s%s" % (name, item.get("nearest_m"), _mountain_ru(mountain), extra),
+              confidence="medium", canon="暗水")
+
+    # водоёмы — отдельный раздел: у контура нет входа и выхода (E-018)
+    shown = 0
+    # Сначала доки и бассейны: это именованная вода, которую читает толкователь; прудов в
+    # радиусе десятки, и по одному расстоянию они вытесняют бассейн из отчёта.
+    for item in sorted(areas, key=lambda w: (0 if w.get("kind") in {"dock", "sea"} else 1,
+                                             w.get("nearest_m") or 1e9)):
+        if shown >= 5 or not _once(item):
+            continue
+        shown += 1
+        name = item.get("name") or item.get("id")
+        inside = item.get("site_inside")
+        inside_txt = ("участок на воде" if inside is True
+                      else ("рядом, вне контура" if inside is False else "не измерено"))
+        area_m2 = _num(item.get("area_m2"))
+        area_txt = ", площадь %s м²" % (("%.0f" % area_m2) if area_m2 is not None else "—")
+        check("WATERBODY-%s" % (name or "?"),
+              "%s: %s м, %s, %s%s" % (name, item.get("nearest_m"),
+                                      _mountain_ru(item.get("nearest_mountain")), inside_txt, area_txt),
+              confidence="high", canon="水 — водоёмы")
 
     # --- внешняя форма против формата (R3 п. 4) ---
     if chart and "旺山旺向" in str(chart.get("format") or ""):
@@ -367,9 +463,22 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         "vein": vein or None,
         "spirits": spirits or None,
         "water": [
-            {k: item.get(k) for k in ("name", "kind", "nearest_m", "in_mountain", "out_mountain",
-                                      "bend", "bend_kind", "tidal", "loop", "water_mouth")}
+            {k: item.get(k) for k in ("id", "name", "kind", "nearest_m", "in_mountain", "out_mountain",
+                                      "bend", "bend_kind", "tidal", "loop", "water_mouth",
+                                      "site_position", "visible", "hidden_share")}
             for item in sorted(rivers, key=lambda w: w.get("nearest_m") or 1e9)[:5]
+        ],
+        # E-019: подземная вода и водоёмы — отдельно от 來水/去水, без повторов
+        "water_hidden": [
+            {k: item.get(k) for k in ("id", "name", "kind", "nearest_m", "nearest_mountain",
+                                      "hidden_share", "visible", "culvert_outfall")}
+            for item in sorted(hidden, key=lambda w: w.get("nearest_m") or 1e9)[:5]
+        ],
+        "water_bodies": [
+            {k: item.get(k) for k in ("id", "name", "kind", "nearest_m", "nearest_mountain",
+                                      "area_m2", "site_inside", "riverbank_of")}
+            for item in sorted(areas, key=lambda w: (0 if w.get("kind") in {"dock", "sea"} else 1,
+                                                     w.get("nearest_m") or 1e9))[:5]
         ],
         "summary": pack.get("summary"),
         "files": pack.get("files"),
@@ -425,10 +534,30 @@ def landform_markdown(data: dict) -> str:
 
     lines.append("## 水 — реки и врата")
     lines.append("")
-    for check in data.get("checks") or []:
-        if check["code"].startswith(("WATER", "GATE", "HIDDEN")):
-            lines.append("- **%s.** %s (%s)" % (check["canon"] or "—", check["text"], check["confidence"]))
+    water_checks = [c for c in data.get("checks") or []
+                    if c["code"].startswith(("WATER-", "GATE-"))]
+    hidden_checks = [c for c in data.get("checks") or [] if c["code"].startswith("HIDDEN-")]
+    body_checks = [c for c in data.get("checks") or [] if c["code"].startswith("WATERBODY-")]
+
+    lines.append("### 來水 / 去水")
     lines.append("")
+    for check in water_checks:
+        lines.append("- **%s.** %s (%s)" % (check["canon"] or "—", check["text"], check["confidence"]))
+    if not water_checks:
+        lines.append("- видимых русел в пакете нет")
+    lines.append("")
+    if hidden_checks:
+        lines.append("### 暗水")
+        lines.append("")
+        for check in hidden_checks:
+            lines.append("- **%s.** %s (%s)" % (check["canon"] or "—", check["text"], check["confidence"]))
+        lines.append("")
+    if body_checks:
+        lines.append("### Водоёмы")
+        lines.append("")
+        for check in body_checks:
+            lines.append("- **%s.** %s (%s)" % (check["canon"] or "—", check["text"], check["confidence"]))
+        lines.append("")
 
     lines.append("## Оговорки")
     lines.append("")
