@@ -9,6 +9,7 @@
 """
 import copy
 import json
+from pathlib import Path
 
 import fengshui_bazi_calc as f
 import landform as L
@@ -45,6 +46,7 @@ def base_pack(**over):
         "dragon_vein": {"length_km": 12.0, "drop_m": 108.1, "bends": 6, "saddles": 0, "alive": True},
         "water": [
             {"id": "osm-River Thames-river", "name": "River Thames", "kind": "river",
+             "geom": "line", "visible": True, "hidden_share": 0.0,
              "nearest_m": 463.6, "in_mountain": "坤", "out_mountain": "辰", "bend": "outer",
              "bend_kind": "bend", "tidal": True, "flow_confidence": "medium",
              "flow_chosen": "downstream_toward_end",
@@ -53,6 +55,7 @@ def base_pack(**over):
                              "capped_sides": 1, "width_m": 4850.0,
                              "closure_confidence": "low"}},
             {"id": "osm-Neglinka-culvert", "name": "Неглинная", "kind": "culvert",
+             "geom": "line", "visible": False, "hidden_share": 1.0,
              "nearest_m": 120.0, "in_mountain": "乾", "out_mountain": "巽"},
         ],
     }
@@ -97,8 +100,11 @@ def run():
           any("не передал уверенность врат" in w for w in data_nc["warnings"]), True)
 
     # 4. Скрытая вода попадает в отчёт
-    hidden = [c for c in data["checks"] if c["code"] == "HIDDEN"]
+    hidden = [c for c in data["checks"] if c["code"].startswith("HIDDEN-")]
     check("скрытая вода", len(hidden), 1)
+    check("скрытая вода: имя", "Неглинная" in hidden[0]["text"], True)
+    check("труба не в 來水",
+          any(c["code"] == "WATER-Неглинная" for c in data["checks"]), False)
 
     # 5. Духи сравниваются по оси: черепаха выше птицы
     texts = " ".join(c["text"] for c in data["checks"])
@@ -212,6 +218,74 @@ def run():
     stale["algo"]["climate"] = "0.9.0"
     check("stale_algo: климат",
           any("climate" in w for w in L.check_pack_versions(stale)), True)
+
+    # 12. E-019: видимость, водоёмы и «каждый объект один раз»
+    split = base_pack()
+    split["water"].extend([
+        {"id": "osm-Fleet-culvert", "name": "River Fleet", "kind": "culvert", "geom": "line",
+         "visible": False, "hidden_share": 0.95, "nearest_m": 404.3, "nearest_mountain": "坤"},
+        {"id": "osm-Mixed-canal", "name": "Mixed Canal", "kind": "canal", "geom": "line",
+         "visible": True, "hidden_share": 0.5, "nearest_m": 900.0,
+         "in_mountain": "子", "out_mountain": "丑", "flow_confidence": "medium"},
+        {"id": "osm-Basin-dock", "name": "City Road Basin", "kind": "dock", "geom": "area",
+         "visible": True, "hidden_share": 0.0, "nearest_m": 1803.1, "nearest_mountain": "子",
+         "area_m2": 10064.8, "site_inside": False},
+    ])
+    data_split = L.landform_data(split, feixing_fn=feixing)
+
+    water_names = [w["name"] for w in data_split["water"]]
+    check("Fleet только в 暗水", "River Fleet" not in water_names, True)
+    check("Fleet в 暗水", any("River Fleet" in c["text"] for c in data_split["checks"]
+                              if c["code"].startswith("HIDDEN-")), True)
+    mixed = next(w for w in data_split["water"] if w["name"] == "Mixed Canal")
+    check("смешанный водоток в 來水", mixed["hidden_share"], 0.5)
+    check("смешанный: пометка о трубе",
+          any("частично в трубе" in c["text"] for c in data_split["checks"]
+              if c["code"] == "WATER-Mixed Canal"), True)
+
+    check("водоём не в 來水", "City Road Basin" not in water_names, True)
+    check("водоём в разделе водоёмов",
+          any(w["name"] == "City Road Basin" for w in data_split["water_bodies"]), True)
+    check("водоём: участок на воде или рядом",
+          any("рядом, вне контура" in c["text"] for c in data_split["checks"]
+              if c["code"] == "WATERBODY-City Road Basin"), True)
+
+    ids = ([w.get("id") for w in data_split["water"]] + [w.get("id") for w in data_split["water_hidden"]]
+           + [w.get("id") for w in data_split["water_bodies"]])
+    check("каждый объект один раз", len(ids), len(set(ids)))
+
+    # 13. E-021: петля печатается с положением участка и уверенностью
+    looped = base_pack()
+    looped["water"][0]["loop"] = {"ratio": 3.05, "turn_deg": 183.2, "area_k": 1.16,
+                                  "confidence": "low", "margin": {"ratio": 0.017, "turn": 0.018}}
+    looped["water"][0]["site_position"] = "outside_concave"
+    data_loop = L.landform_data(looped, feixing_fn=feixing)
+    loop_text = " ".join(c["text"] for c in data_loop["checks"] if c["code"] == "WATER-River Thames")
+    check("петля: положение участка", "внешней стороны вогнутости" in loop_text, True)
+    check("петля: уверенность в скобках", "уверенность low" in loop_text, True)
+    check("петля low → оговорка",
+          any("петля с запасом" in w for w in data_loop["warnings"]), True)
+
+    # 14. R8: пакет до 7.0.0 читается по старой логике, с оговоркой stale_algo
+    legacy = json.loads((Path(__file__).resolve().parent.parent
+                         / "tests" / "fixtures" / "london-city-site_pack.json").read_text(encoding="utf-8"))
+    data_legacy = L.landform_data(legacy, feixing_fn=feixing)
+    check("старый пакет: оговорка stale_algo",
+          any("stale_algo" in w and "geom" in w for w in data_legacy["warnings"]), True)
+
+    # 15. Свежий лондонский пакет: разделы не пересекаются, Флит в 暗水, бассейн в водоёмах
+    fresh = json.loads((Path(__file__).resolve().parent.parent
+                        / "tests" / "fixtures" / "london-city-site_pack-7.json").read_text(encoding="utf-8"))
+    data_fresh = L.landform_data(fresh, feixing_fn=feixing)
+    fresh_water = [w["name"] for w in data_fresh["water"]]
+    check("свежий пакет: Темза в 來水", "River Thames" in fresh_water, True)
+    check("свежий пакет: Fleet не в 來水", "River Fleet" not in fresh_water, True)
+    check("свежий пакет: бассейн в водоёмах",
+          any(w["name"].startswith("City Road Basin") for w in data_fresh["water_bodies"]), True)
+    fresh_ids = ([w.get("id") for w in data_fresh["water"]]
+                 + [w.get("id") for w in data_fresh["water_hidden"]]
+                 + [w.get("id") for w in data_fresh["water_bodies"]])
+    check("свежий пакет: без повторов", len(fresh_ids), len(set(fresh_ids)))
 
 
 if __name__ == "__main__":
