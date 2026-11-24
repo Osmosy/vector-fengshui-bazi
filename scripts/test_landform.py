@@ -9,6 +9,7 @@
 """
 import copy
 import json
+import re
 from pathlib import Path
 
 import fengshui_bazi_calc as f
@@ -304,6 +305,25 @@ def run():
     check("причина печатается в строке",
           any("вход и выход в одной горе: короткий кусок" in c["text"]
               for c in data_fresh["checks"] if c["code"].startswith("WATER-")), True)
+
+    # 17. Вне круга 2 км: только расстояние и сторона, без пары 來水/去水
+    far_checks = [c for c in data_fresh["checks"]
+                  if c["code"].startswith("WATER-") and "не измерены" in c["text"]]
+    check("дальнее русло: пара не печатается", len(far_checks) > 0, True)
+    check("дальнее русло: есть сторона",
+          all("сторона" in c["text"] and "вход и выход не измерены" in c["text"]
+              for c in far_checks), True)
+    check("дальнее русло: нет выдуманной пары",
+          any("вход —" in c["text"] or "выход —" in c["text"] for c in far_checks), False)
+
+    # 18. Оговорки: только показанное, остальное одной строкой
+    check("оговорки: дальние не перечислены",
+          any(w.startswith("ещё ") and "в пакете" in w for w in data_fresh["warnings"]), True)
+    low_line = next((w for w in data_fresh["warnings"] if w.startswith("поля с уверенностью low")), "")
+    fresh_shown = set(fresh_ids)
+    listed = re.findall(r"water\.flow:([^,]+)", low_line)
+    check("оговорки: только объекты отчёта",
+          [n for n in listed if n not in {str(w.get("name")) for w in data_fresh["water"]}], [])
 
 
 if __name__ == "__main__":

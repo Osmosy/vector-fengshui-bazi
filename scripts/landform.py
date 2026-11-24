@@ -309,6 +309,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         if owner:
             channels.setdefault(owner, []).append(item.get("name") or str(item.get("id")))
 
+    reported: set[str] = set()   # id объектов, реально попавших в отчёт
     seen_ids: set[str] = set()
 
     def _once(item: dict) -> bool:
@@ -325,6 +326,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         if shown >= 5 or not _once(item):
             continue
         shown += 1
+        reported.add(str(item.get("id")))
         name = item.get("name") or item.get("id")
         tid = item.get("tidal")
         tide_txt = "приливная" if tid is True else ("неприливная" if tid is False else "приливность неизвестна")
@@ -351,12 +353,18 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         if modern and 0.2 <= share < 0.8:
             partial = ", частично в трубе (%d %%), видимая часть — гора %s" % (
                 round(share * 100), _mountain_ru(item.get("out_mountain")))
-        check("WATER-%s" % (name or "?"),
-              "%s: %s м, вход %s, выход %s, %s, %s%s%s%s" % (
-                  name, item.get("nearest_m"), _mountain_ru(item.get("in_mountain")),
-                  _mountain_ru(item.get("out_mountain")), bend, tide_txt, loop_txt, same_txt,
-                  partial),
-              confidence=item.get("flow_confidence") or "unknown", canon="水 — 來水 / 去水")
+        if item.get("in_mountain") is None and item.get("out_mountain") is None:
+            # Пара 來水/去水 не измерена: внутри круга 2 км от русла нет ни метра
+            # (в пакете in_mountain и out_mountain отсутствуют). Даём сторону и расстояние.
+            text = "%s: %s м, сторона %s, вход и выход не измерены (вне круга 2 км)%s" % (
+                name, item.get("nearest_m"), _mountain_ru(item.get("nearest_mountain")), partial)
+        else:
+            text = "%s: %s м, вход %s, выход %s, %s, %s%s%s%s" % (
+                name, item.get("nearest_m"), _mountain_ru(item.get("in_mountain")),
+                _mountain_ru(item.get("out_mountain")), bend, tide_txt, loop_txt, same_txt,
+                partial)
+        check("WATER-%s" % (name or "?"), text,
+              confidence=item.get("flow_confidence") or "нет замера", canon="水 — 來水 / 去水")
         mouth = item.get("water_mouth") or {}
         if mouth:
             closing = mouth.get("closure_index")
@@ -381,6 +389,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         if shown >= 5 or not _once(item):
             continue
         shown += 1
+        reported.add(str(item.get("id")))
         name = item.get("name") or item.get("id")
         outfall = item.get("culvert_outfall")
         extra = ", выход на поверхность: %s" % _mountain_ru(outfall) if outfall else ""
@@ -398,6 +407,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         if shown >= 5 or not _once(item):
             continue
         shown += 1
+        reported.add(str(item.get("id")))
         name = item.get("name") or item.get("id")
         inside = item.get("site_inside")
         inside_txt = ("участок на воде" if inside is True
@@ -461,17 +471,26 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
     low_fields = []
     if confidence == "low":
         low_fields.append("orientation")
+    far_low = 0
     for item in water:
-        if item.get("flow_confidence") == "low":
+        if item.get("flow_confidence") == "low" and str(item.get("id")) not in reported:
+            far_low += 1
+        if item.get("flow_confidence") == "low" and str(item.get("id")) in reported:
             low_fields.append("water.flow:%s" % (item.get("name") or item.get("id")))
         if _get(item, "water_mouth", "closure_confidence") == "low":
             low_fields.append("water.closure:%s" % (item.get("name") or item.get("id")))
     for item in water:
-        if item.get("flow_chosen") and not item.get("flow_confidence"):
+        if (item.get("flow_chosen") and not item.get("flow_confidence")
+                and item.get("in_mountain") is not None):
             warnings.append("water.flow:%s — правило течения без уверенности"
                             % (item.get("name") or item.get("id")))
     if low_fields:
         warnings.append("поля с уверенностью low: " + ", ".join(sorted(set(low_fields))))
+    if far_low:
+        # В пакете воды больше, чем в отчёте: дальние водотоки с низкой уверенностью не
+        # перечисляем поимённо, иначе оговорки перерастают сам отчёт.
+        warnings.append("ещё %d водоток(а) с низкой уверенностью за пределами отчёта — в пакете"
+                        % far_low)
 
     return {
         "schema": pack.get("schema"),
