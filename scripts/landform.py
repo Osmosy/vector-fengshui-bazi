@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 MOUNTAIN_CENTER = {  # 24 горы: центр сектора в градусах
@@ -50,6 +51,10 @@ def _num(value):
 
 AQUATIC_KINDS = {"river", "stream", "canal", "culvert"}
 
+# Водоём меньше этого в отчёт не идёт: у контура такого размера нет ни стороны, ни влияния,
+# он остаётся только в water.geojson (E-020 доп., порог описан в docs/calc/rivers.md).
+AREA_MIN_M2 = 500.0
+
 # E-021: положение участка относительно петли — словами, а не кодом поля
 LOOP_POSITION_RU = {
     "inside": "участок охвачен водой (玉帶)",
@@ -66,6 +71,12 @@ def _is_area(item: dict) -> bool:
 def _hidden_share(item: dict) -> float:
     value = _num(item.get("hidden_share"))
     return value if value is not None else 0.0
+
+
+def _same_mountains_in_text(text: str) -> bool:
+    """Вход и выход в одной горе — по строке отчёта (сторожевой тест E-020 п.2)."""
+    found = re.search(r"вход (.+?), выход (.+?),", text)
+    return bool(found and found.group(1) == found.group(2))
 
 
 def _mountain_ru(name: str | None) -> str:
@@ -274,8 +285,10 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
     courses = [w for w in water if w.get("kind") in AQUATIC_KINDS]
     modern = any("geom" in w for w in water)
     if modern:
-        areas = [w for w in water if _is_area(w)]
-        line_water = [w for w in courses if not _is_area(w)]
+        areas = [w for w in water
+                 if _is_area(w) and (_num(w.get("area_m2")) or 0.0) >= AREA_MIN_M2]
+        # Док-канал (`dock_channel_of`) — не русло: он показывается вместе с контуром
+        line_water = [w for w in courses if not _is_area(w) and not w.get("dock_channel_of")]
         streaming = [w for w in line_water
                      if w.get("visible") is not False and _hidden_share(w) < 0.8]
         hidden = [w for w in line_water
@@ -289,6 +302,12 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         streaming = list(courses)
         hidden = [w for w in water if w.get("kind") == "culvert"]
     rivers = streaming
+
+    channels: dict[str, list[str]] = {}
+    for item in water:
+        owner = item.get("dock_channel_of")
+        if owner:
+            channels.setdefault(owner, []).append(item.get("name") or str(item.get("id")))
 
     seen_ids: set[str] = set()
 
@@ -323,15 +342,20 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
                 # E-021: пограничную петлю не выдаём за 玉帶 или 反弓 наверняка
                 warnings.append("%s: петля с запасом у порога (margin %s) — вывод о петле с оговоркой"
                                 % (name or "?", loop.get("margin")))
+        reason = item.get("same_mountain_reason")
+        same_txt = ""
+        if reason and item.get("in_mountain") and item.get("in_mountain") == item.get("out_mountain"):
+            same_txt = ", вход и выход в одной горе: %s" % reason
         partial = ""
         share = _hidden_share(item)
         if modern and 0.2 <= share < 0.8:
             partial = ", частично в трубе (%d %%), видимая часть — гора %s" % (
                 round(share * 100), _mountain_ru(item.get("out_mountain")))
         check("WATER-%s" % (name or "?"),
-              "%s: %s м, вход %s, выход %s, %s, %s%s%s" % (
+              "%s: %s м, вход %s, выход %s, %s, %s%s%s%s" % (
                   name, item.get("nearest_m"), _mountain_ru(item.get("in_mountain")),
-                  _mountain_ru(item.get("out_mountain")), bend, tide_txt, loop_txt, partial),
+                  _mountain_ru(item.get("out_mountain")), bend, tide_txt, loop_txt, same_txt,
+                  partial),
               confidence=item.get("flow_confidence") or "unknown", canon="水 — 來水 / 去水")
         mouth = item.get("water_mouth") or {}
         if mouth:
@@ -380,9 +404,11 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
                       else ("рядом, вне контура" if inside is False else "не измерено"))
         area_m2 = _num(item.get("area_m2"))
         area_txt = ", площадь %s м²" % (("%.0f" % area_m2) if area_m2 is not None else "—")
+        channel_txt = ", канал внутри контура" if channels.get(str(item.get("id"))) else ""
         check("WATERBODY-%s" % (name or "?"),
-              "%s: %s м, %s, %s%s" % (name, item.get("nearest_m"),
-                                      _mountain_ru(item.get("nearest_mountain")), inside_txt, area_txt),
+              "%s: %s м, %s, %s%s%s" % (name, item.get("nearest_m"),
+                                        _mountain_ru(item.get("nearest_mountain")), inside_txt,
+                                        area_txt, channel_txt),
               confidence="high", canon="水 — водоёмы")
 
     # --- внешняя форма против формата (R3 п. 4) ---

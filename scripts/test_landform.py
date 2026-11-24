@@ -287,6 +287,24 @@ def run():
                  + [w.get("id") for w in data_fresh["water_bodies"]])
     check("свежий пакет: без повторов", len(fresh_ids), len(set(fresh_ids)))
 
+    # 16. E-020 п.1-2 (доп.): док-каналы, порог площади, причина одинаковых гор
+    fresh_codes = [c["code"] for c in data_fresh["checks"]]
+    check("док-канал не в 來水", "WATER-West Dock" not in fresh_codes, True)
+    check("док-канал не в 來水: Central Basin", "WATER-Central Basin" not in fresh_codes, True)
+    check("док-контур в водоёмах", "WATERBODY-West Dock" in fresh_codes, True)
+    check("пометка о канале в контуре",
+          any("канал внутри контура" in c["text"] for c in data_fresh["checks"]
+              if c["code"] == "WATERBODY-West Dock"), True)
+    check("мелкий водоём не в отчёте", "WATERBODY-Tower Dock" not in fresh_codes, True)
+
+    same_high = [c["code"] for c in data_fresh["checks"]
+                 if c["code"].startswith("WATER-") and c["confidence"] == "high"
+                 and L._same_mountains_in_text(c["text"])]
+    check("в 來水 нет одинаковых гор с high", same_high, [])
+    check("причина печатается в строке",
+          any("вход и выход в одной горе: короткий кусок" in c["text"]
+              for c in data_fresh["checks"] if c["code"].startswith("WATER-")), True)
+
 
 if __name__ == "__main__":
     run()
