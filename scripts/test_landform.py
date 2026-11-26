@@ -320,6 +320,20 @@ def run():
     check("дальнее русло: нет выдуманной пары",
           any("вход —" in c["text"] or "выход —" in c["text"] for c in far_checks), False)
 
+    # 19a. Поверхность реки (берег из отношения, water 8.0.0) — подпись «берег реки»
+    river_bank = base_pack()
+    river_bank["water"].append({
+        "id": "osm-rel28934000-lake", "name": "River Thames", "kind": "lake",
+        "nearest_m": 340.0, "nearest_azimuth_deg": 180.0, "nearest_mountain": "午",
+        "area_m2": 2429113.7, "site_inside": False, "geom": "area", "visible": True,
+        "riverbank_of": "osm-thames-river", "source": "osm_relation",
+    })
+    bank_data = L.landform_data(river_bank, feixing_fn=feixing)
+    bank_text = " ".join(c["text"] for c in bank_data["checks"]
+                         if c["code"].startswith("WATERBODY-River Thames"))
+    check("берег реки: подпись", "берег реки: River Thames" in bank_text, True)
+    check("берег реки: площадь", "2429114" in bank_text, True)
+
     # 19. Схема site_pack/2: стороны названы back/front/left/right — навык читает оба набора
     schema2 = base_pack()
     old = schema2["four_spirits"]
