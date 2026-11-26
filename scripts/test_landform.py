@@ -145,13 +145,17 @@ def run():
           any(w.startswith("stale_algo") for w in data_old["warnings"]), True)
 
     # 10b. R8: чужая схема — отказ с понятным сообщением
-    wrong = base_pack(schema="site_pack/2")
+    wrong = base_pack(schema="site_pack/3")
     try:
         L.landform_data(wrong, feixing_fn=feixing)
         refused = False
     except ValueError:
         refused = True
     check("чужая схема: отказ", refused, True)
+    # 10b2. схема 2: читается, но с оговоркой, что две интерпретации ещё не сделаны
+    s2 = base_pack(schema="site_pack/2")
+    data_s2 = L.landform_data(s2, feixing_fn=feixing)
+    check("схема 2: оговорка", any(w.startswith("schema:") for w in data_s2["warnings"]), True)
 
     # 10c. R3: год и текущий период в отчёте
     year_text = " ".join(c["text"] for c in data["checks"] if c["code"].startswith("YEAR"))
@@ -315,6 +319,22 @@ def run():
               for c in far_checks), True)
     check("дальнее русло: нет выдуманной пары",
           any("вход —" in c["text"] or "выход —" in c["text"] for c in far_checks), False)
+
+    # 19. Схема site_pack/2: стороны названы back/front/left/right — навык читает оба набора
+    schema2 = base_pack()
+    old = schema2["four_spirits"]
+    schema2["four_spirits"] = {
+        "back": old["tortoise"], "front": old["bird"],
+        "left": old["dragon"], "right": old["tiger"],
+        "left_vs_right": old["dragon_vs_tiger"],
+    }
+    schema2["schema"] = "site_pack/2"
+    data_s2 = L.landform_data(schema2, feixing_fn=feixing)
+    codes_old = {c["code"] for c in data["checks"]}
+    codes_new = {c["code"] for c in data_s2["checks"]}
+    check("схема 2: те же проверки формы", codes_new == codes_old, True)
+    check("схема 2: спина выше фасада прочитана",
+          any(c["code"] == "SPIRIT-BACK-STRONG" for c in data_s2["checks"]), True)
 
     # 18. Оговорки: только показанное, остальное одной строкой
     check("оговорки: дальние не перечислены",
