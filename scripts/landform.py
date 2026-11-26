@@ -27,6 +27,7 @@ MOUNTAIN_RU = {
 }
 
 # R8: минимальные версии, с которыми навык умеет читать пакет
+SUPPORTED_SCHEMAS = {"site_pack/1", "site_pack/2"}
 MIN_SCHEMA = "site_pack/1"
 MIN_ALGO = {"water": (6, 1, 0), "terrain": (2, 0, 0), "pack": (1, 2, 0),
             "climate": (1, 0, 0)}
@@ -79,6 +80,30 @@ def _same_mountains_in_text(text: str) -> bool:
     return bool(found and found.group(1) == found.group(2))
 
 
+SPIRIT_ALIASES = {"tortoise": ("tortoise", "back"), "bird": ("bird", "front"),
+                  "dragon": ("dragon", "left"), "tiger": ("tiger", "right")}
+
+
+def _normalize_spirits(spirits: dict) -> dict:
+    """Хранители сторон: схема 1 зовёт их именами духов, схема 2 (pack 2.0.0) — back/front/left/right.
+
+    До PR 11 навык читает оба набора и приводит к одному виду: пакет 2.0.0 не должен
+    «не открываться» только из-за переименования.
+    """
+    if not spirits:
+        return spirits or {}
+    out: dict = {}
+    for canonical, aliases in SPIRIT_ALIASES.items():
+        for alias in aliases:
+            if alias in spirits:
+                out[canonical] = spirits[alias]
+                break
+    diff = spirits.get("dragon_vs_tiger", spirits.get("left_vs_right"))
+    if diff is not None:
+        out["dragon_vs_tiger"] = diff
+    return out
+
+
 def _mountain_ru(name: str | None) -> str:
     if not name:
         return "—"
@@ -100,10 +125,15 @@ def check_pack_versions(pack: dict) -> list[str]:
     старее минимальной — читаем, но предупреждаем: числа могли считаться по старым правилам.
     """
     schema = pack.get("schema")
-    if schema != MIN_SCHEMA:
-        raise ValueError("пакет собран по схеме %r, навык читает только %r: пересоберите пакет "
-                         "в vector-geo-site" % (schema, MIN_SCHEMA))
+    if schema not in SUPPORTED_SCHEMAS:
+        raise ValueError("пакет собран по схеме %r, навык читает %r: пересоберите пакет "
+                         "в vector-geo-site" % (schema, ", ".join(sorted(SUPPORTED_SCHEMAS))))
+    # site_pack/2 = pack 2.0.0: стороны названы back/front/left/right (H4). Пока навык не
+    # научен двум интерпретациям (PR 11), схема 2 читается как одна, классическая.
     warnings = []
+    if schema != MIN_SCHEMA:
+        warnings.append("schema: пакет схемы %s — стороны читаются как back/front/left/right; "
+                        "две интерпретации для Южного полушария ещё не поддерживаются" % schema)
     algo = pack.get("algo") or {}
     for name, minimum in MIN_ALGO.items():
         have = _version_tuple(algo.get(name))
@@ -154,7 +184,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
                 "water_share": _num(ring.get("water_share")),
             }
 
-    spirits = pack.get("four_spirits") or {}
+    spirits = _normalize_spirits(pack.get("four_spirits") or {})
     vein = pack.get("dragon_vein") or {}
     point = pack.get("point") or {}
     water = pack.get("water") or []
