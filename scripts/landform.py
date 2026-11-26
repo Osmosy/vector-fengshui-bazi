@@ -432,13 +432,31 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
     shown = 0
     # Сначала доки и бассейны: это именованная вода, которую читает толкователь; прудов в
     # радиусе десятки, и по одному расстоянию они вытесняют бассейн из отчёта.
-    for item in sorted(areas, key=lambda w: (0 if w.get("kind") in {"dock", "sea"} else 1,
-                                             w.get("nearest_m") or 1e9)):
+    # Доки и бассейны первыми, дальше — по площади: с water 8.0.0 в пакете появились
+    # поверхности рек (берега Темзы), и по расстоянию они вытеснялись прудами соседнего двора.
+    def body_rank(w: dict) -> tuple[int, float]:
+        """Поверхность реки важнее дока, док важнее пруда; внутри группы — по площади."""
+        kind = 0 if w.get("riverbank_of") else (1 if w.get("kind") in {"dock", "sea"} else 2)
+        return (kind, -(w.get("area_m2") or 0.0))
+
+    seen_banks: set[str] = set()
+    for item in sorted(areas, key=body_rank):
+        bank = str(item.get("riverbank_of") or "")
+        if bank and bank in seen_banks:
+            # поверхность одной реки в OSM разрезана мостами: в отчёт идёт ближайший кусок,
+            # остальные остаются в water.geojson, а не занимают строки отчёта
+            reported.add(str(item.get("id")))
+            continue
         if shown >= 5 or not _once(item):
             continue
+        if bank:
+            seen_banks.add(bank)
         shown += 1
         reported.add(str(item.get("id")))
         name = item.get("name") or item.get("id")
+        # поверхность реки — не пруд: в пакете у неё `riverbank_of`, и в отчёте она так и
+        # называется, иначе «River Thames, площадь 2 429 113 м²» читается как озеро
+        label = ("берег реки: %s" % name) if item.get("riverbank_of") else name
         inside = item.get("site_inside")
         inside_txt = ("участок на воде" if inside is True
                       else ("рядом, вне контура" if inside is False else "не измерено"))
@@ -446,7 +464,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         area_txt = ", площадь %s м²" % (("%.0f" % area_m2) if area_m2 is not None else "—")
         channel_txt = ", канал внутри контура" if channels.get(str(item.get("id"))) else ""
         check("WATERBODY-%s" % (name or "?"),
-              "%s: %s м, %s, %s%s%s" % (name, item.get("nearest_m"),
+              "%s: %s м, %s, %s%s%s" % (label, item.get("nearest_m"),
                                         _mountain_ru(item.get("nearest_mountain")), inside_txt,
                                         area_txt, channel_txt),
               confidence="high", canon="水 — водоёмы")
