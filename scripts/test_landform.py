@@ -429,6 +429,26 @@ def run():
     check("зеркало: юг — вода", mirror_view["elements"]["south"], "Вода (水)")
     check("классика: север — вода", classic_view["elements"]["north"], "Вода (水)")
 
+    # 21a. Основание стихий названо по школе: компас — классика, солнце — зеркало.
+    # В зеркале «по компасу» описывало бы противоположное правило: север там получает огонь
+    # именно потому, что на севере полуденное солнце.
+    classic_elements = next(c for c in classic_view["checks"] if c["code"] == "SCHOOL-ELEMENTS")
+    mirror_elements = next(c for c in mirror_view["checks"] if c["code"] == "SCHOOL-ELEMENTS")
+    check("классика: стихии по компасу",
+          classic_elements["text"].startswith("стихии по компасу"), True)
+    check("зеркало: стихии по солнцу",
+          mirror_elements["text"].startswith("стихии по солнцу"), True)
+
+    # 21b. Отклонение фасада: 15° (гора) — совпадение, до 45° — «близко», дальше — «не совпадает».
+    # В base_pack фасад 135°, предпочтительный на юге 180°: 45° — это соседняя гора, не совпадение.
+    classic_facing = next(c for c in classic_view["checks"] if c["code"] == "SCHOOL-FACING")
+    mirror_facing = next(c for c in mirror_view["checks"] if c["code"] == "SCHOOL-FACING")
+    check("фасад 45° от юга — «близко»", "близко" in classic_facing["text"], True)
+    check("фасад 45° от юга — не «совпадает»",
+          "совпадает" not in classic_facing["text"], True)
+    check("фасад 135° от севера — «не совпадает»",
+          "не совпадает" in mirror_facing["text"], True)
+
     # 22. --mirror-dragon: 青龍 и 白虎 меняются местами (по умолчанию включено)
     dragon_on = L.landform_data(south_pack(), feixing_fn=feixing)["interpretations"][1]
     dragon_off = L.landform_data(south_pack(), feixing_fn=feixing,

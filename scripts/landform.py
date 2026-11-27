@@ -103,7 +103,7 @@ SPIRIT_ALIASES = {"tortoise": ("tortoise", "back"), "bird": ("bird", "front"),
 def _normalize_spirits(spirits: dict) -> dict:
     """Хранители сторон: схема 1 зовёт их именами духов, схема 2 (pack 2.0.0) — back/front/left/right.
 
-    До PR 11 навык читает оба набора и приводит к одному виду: пакет 2.0.0 не должен
+    Навык читает оба набора и приводит к одному виду: пакет 2.0.0 не должен
     «не открываться» только из-за переименования.
     """
     if not spirits:
@@ -144,8 +144,8 @@ def check_pack_versions(pack: dict) -> list[str]:
     if schema not in SUPPORTED_SCHEMAS:
         raise ValueError("пакет собран по схеме %r, навык читает %r: пересоберите пакет "
                          "в vector-geo-site" % (schema, ", ".join(sorted(SUPPORTED_SCHEMAS))))
-    # site_pack/2 = pack 2.0.0: стороны названы back/front/left/right (H4). Пока навык не
-    # научен двум интерпретациям (PR 11), схема 2 читается как одна, классическая.
+    # site_pack/2 = pack 2.0.0: стороны названы back/front/left/right (H4). Полушарие
+    # определяется по широте участка, поэтому обе интерпретации строятся и на схеме 2.
     warnings = []
     if schema != MIN_SCHEMA:
         warnings.append("schema: пакет схемы %s — стороны читаются как back/front/left/right "
@@ -215,15 +215,25 @@ def _school_view(school: str, *, pack: dict, spirits: dict, orientation: dict,
     else:
         chart = feixing_fn(facing_chart, None, year, annual, tz)
 
+    # Зеркальная школа ставит стихии по солнцу, а не по компасу: север получает огонь именно
+    # потому, что там полуденное солнце, и «по компасу» описывало бы противоположное правило.
+    elements_basis = "стихии по солнцу" if mirror else "стихии по компасу"
     checks.append({"code": "SCHOOL-ELEMENTS",
-                   "text": "стихии по компасу: север — %s, юг — %s" % (elements["north"], elements["south"]),
+                   "text": "%s: север — %s, юг — %s" % (elements_basis, elements["north"],
+                                                       elements["south"]),
                    "confidence": "high", "canon": "五行 по сторонам"})
     facing_mountain = orientation.get("facing_mountain")
     if facing is not None and facing_mountain:
         preferred_deg = 180.0 if not mirror else 0.0
         delta = abs((facing - preferred_deg + 180) % 360 - 180)
-        verdict = ("фасад совпадает с предпочтительным" if delta <= 45
-                   else "фасад не совпадает с предпочтительным (%s° от него)" % round(delta))
+        # 15° — половина горы (24 горы по 15°): в пределах одной горы фасад «совпадает»;
+        # до 45° это соседняя гора — «близко», а не совпадение
+        if delta <= 15:
+            verdict = "фасад совпадает с предпочтительным"
+        elif delta <= 45:
+            verdict = "фасад близко к предпочтительному (%s° от него)" % round(delta)
+        else:
+            verdict = "фасад не совпадает с предпочтительным (%s° от него)" % round(delta)
         checks.append({"code": "SCHOOL-FACING",
                        "text": "предпочтительный фасад — %s; фактический — %s (%s°), %s" % (
                            PREFERRED_FACING[school], _mountain_ru(facing_mountain), facing, verdict),
