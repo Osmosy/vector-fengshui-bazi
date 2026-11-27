@@ -36,6 +36,22 @@ CURRENT_PERIOD = (9, 2024, 2043)
 SPIRIT_RU = {"tortoise": "черепаха (спина)", "bird": "птица (фасад)",
              "dragon": "дракон (слева)", "tiger": "тигр (справа)"}
 
+# --- H5–H8: две школы для Южного полушария -----------------------------------------------
+# Классическая школа ставит стихии по компасу и в Южном полушарии не меняется: север — вода,
+# юг — огонь. Зеркальная школа меняет местами стихии севера и юга и предпочитает фасад на
+# север: там солнце, и «гора за спиной» оказывается на юге. Ни одна школа не называется
+# правильной — навык показывает обе и говорит, где они расходятся.
+SCHOOLS = ("classic", "mirror", "both")
+SCHOOL_RU = {"classic": "классическая школа", "mirror": "зеркальная школа (Южное полушарие)"}
+# Таблица соответствий — references/fengshui.md §10, у каждой строки источник или школа
+ELEMENTS_CLASSIC = {"north": "Вода (水)", "south": "Огонь (火)", "east": "Дерево (木)",
+                    "west": "Металл (金)"}
+ELEMENTS_MIRROR = {**ELEMENTS_CLASSIC, "north": "Огонь (火)", "south": "Вода (水)"}
+PREFERRED_FACING = {"classic": "юг", "mirror": "север"}
+# «Около экватора»: в пределах 10° солнце стоит почти над головой и бывает с обеих сторон —
+# различие школ для такого участка слабее, и об этом говорится отдельной строкой (H5 п. 5).
+EQUATORIAL_LAT_DEG = 10.0
+
 
 def _get(obj, *path, default=None):
     cur = obj
@@ -132,8 +148,8 @@ def check_pack_versions(pack: dict) -> list[str]:
     # научен двум интерпретациям (PR 11), схема 2 читается как одна, классическая.
     warnings = []
     if schema != MIN_SCHEMA:
-        warnings.append("schema: пакет схемы %s — стороны читаются как back/front/left/right; "
-                        "две интерпретации для Южного полушария ещё не поддерживаются" % schema)
+        warnings.append("schema: пакет схемы %s — стороны читаются как back/front/left/right "
+                        "(H4); полушарие определяется по широте участка" % schema)
     algo = pack.get("algo") or {}
     for name, minimum in MIN_ALGO.items():
         have = _version_tuple(algo.get(name))
@@ -144,8 +160,139 @@ def check_pack_versions(pack: dict) -> list[str]:
     return warnings
 
 
+def hemisphere(pack: dict) -> str:
+    """`north` или `south` по широте участка. Широты нет — считаем севером и говорим об этом."""
+    lat = _num(_get(pack, "site", "lat"))
+    return "south" if lat is not None and lat < 0 else "north"
+
+
+def equatorial(pack: dict) -> bool:
+    lat = _num(_get(pack, "site", "lat"))
+    return lat is not None and abs(lat) <= EQUATORIAL_LAT_DEG
+
+
+def _spirit_value(spirits: dict, key: str, field: str):
+    return _num(_get(spirits, key, field))
+
+
+def _school_view(school: str, *, pack: dict, spirits: dict, orientation: dict,
+                 facing: float | None, year: int | None, annual: int | None, tz: float,
+                 feixing_fn, mirror_dragon: bool, mirror_flying_stars: bool) -> dict:
+    """Одна интерпретация целиком: стихии, фасад, духи, форма, карта звёзд.
+
+    Интерпретация самостоятельная: у неё свои стихии, свои 青龍/白虎 и своя карта, поэтому
+    читатель сравнивает два полных вывода, а не «основной и поправку к нему».
+    """
+    mirror = school == "mirror"
+    elements = ELEMENTS_MIRROR if mirror else ELEMENTS_CLASSIC
+    checks: list[dict] = []
+    notes: list[str] = []
+    variants: dict = {}
+
+    # 青龍 / 白虎: в зеркале меняются сторонами (H6, --mirror-dragon по умолчанию включён)
+    dragon = _spirit_value(spirits, "tiger" if mirror and mirror_dragon else "dragon", "rel_elev_m")
+    tiger = _spirit_value(spirits, "dragon" if mirror and mirror_dragon else "tiger", "rel_elev_m")
+    if mirror:
+        variants["mirror_dragon"] = mirror_dragon
+        variants["mirror_flying_stars"] = mirror_flying_stars
+        if mirror_dragon:
+            notes.append("青龍 = right, 白虎 = left — вариант школы")
+        else:
+            notes.append("青龍 = left, 白虎 = right — зеркало без перестановки сторон")
+
+    # карта звёзд: в зеркале ось повёрнута на 180° (H6, --mirror-flying-stars)
+    chart = None
+    chart_note = None
+    facing_chart = facing
+    if mirror and mirror_flying_stars and facing is not None:
+        facing_chart = (facing + 180.0) % 360.0
+        notes.append("летящие звёзды считаны по оси, повёрнутой на 180° (%s°) — вариант школы"
+                     % round(facing_chart, 1))
+    if feixing_fn is None:
+        chart_note = "расчёт звёзд не передан"
+    elif facing_chart is None or year is None:
+        chart_note = "нет оси или года застройки в пакете"
+    else:
+        chart = feixing_fn(facing_chart, None, year, annual, tz)
+
+    checks.append({"code": "SCHOOL-ELEMENTS",
+                   "text": "стихии по компасу: север — %s, юг — %s" % (elements["north"], elements["south"]),
+                   "confidence": "high", "canon": "五行 по сторонам"})
+    facing_mountain = orientation.get("facing_mountain")
+    if facing is not None and facing_mountain:
+        preferred_deg = 180.0 if not mirror else 0.0
+        delta = abs((facing - preferred_deg + 180) % 360 - 180)
+        verdict = ("фасад совпадает с предпочтительным" if delta <= 45
+                   else "фасад не совпадает с предпочтительным (%s° от него)" % round(delta))
+        checks.append({"code": "SCHOOL-FACING",
+                       "text": "предпочтительный фасад — %s; фактический — %s (%s°), %s" % (
+                           PREFERRED_FACING[school], _mountain_ru(facing_mountain), facing, verdict),
+                       "confidence": "medium", "canon": "向"})
+    if dragon is not None and tiger is not None:
+        side = "青龍 выше" if dragon > tiger else "白虎 выше"
+        checks.append({"code": "SCHOOL-SIDES",
+                       "text": "%s: 青龍 %+.0f м, 白虎 %+.0f м (%s на %.0f м)" % (
+                           SCHOOL_RU[school], dragon, tiger, side, abs(dragon - tiger)),
+                       "confidence": "medium", "canon": "青龍 / 白虎"})
+    if chart:
+        checks.append({"code": "SCHOOL-STARS",
+                       "text": "карта: период %s, формат %s, фасад карты %s" % (
+                           chart.get("period"), chart.get("format"), _mountain_ru(chart.get("facing"))),
+                       "confidence": "high", "canon": "飛星"})
+    elif chart_note:
+        notes.append("карта звёзд не рассчитана: %s" % chart_note)
+
+    return {"school": school, "label": SCHOOL_RU[school], "elements": elements,
+            "preferred_facing": PREFERRED_FACING[school], "dragon": dragon, "tiger": tiger,
+            "chart": chart, "chart_note": chart_note, "checks": checks, "notes": notes,
+            "variants": variants}
+
+
+def divergences(classic: dict, mirror: dict, *, facing: float | None) -> list[dict]:
+    """«Где школы расходятся»: только то, что для этого участка действительно разное.
+
+    Совпавший вывод не выбрасывается, а помечается словом «совпадает»: читатель должен
+    видеть, что школа проверена, а не забыта (H7 п. 2).
+    """
+    rows = [{"topic": "Стихия севера", "classic": classic["elements"]["north"],
+             "mirror": mirror["elements"]["north"],
+             "meaning": "север в зеркале — огонь, а не вода: оценка северной стороны меняется"},
+            {"topic": "Стихия юга", "classic": classic["elements"]["south"],
+             "mirror": mirror["elements"]["south"],
+             "meaning": "юг в зеркале — вода: южная сторона читается иначе"},
+            {"topic": "Предпочтительный фасад", "classic": classic["preferred_facing"],
+             "mirror": mirror["preferred_facing"],
+             "meaning": ("фасад участка (%s°) ближе к %s" % (
+                 facing, classic["preferred_facing"] if facing is not None
+                 and abs((facing - 180 + 180) % 360 - 180) <= 90 else mirror["preferred_facing"]))
+             if facing is not None else "фактический фасад в пакете не задан"}]
+    if classic.get("dragon") is not None and mirror.get("dragon") is not None:
+        classic_side = "青龍 выше" if (classic["dragon"] or 0) > (classic["tiger"] or 0) else "白虎 выше"
+        mirror_side = "青龍 выше" if (mirror["dragon"] or 0) > (mirror["tiger"] or 0) else "白虎 выше"
+        rows.append({"topic": "青龍 и 白虎", "classic": classic_side, "mirror": mirror_side,
+                     "meaning": ("вывод о сторонах совпадает" if classic_side == mirror_side
+                                 else "стороны меняются местами: сильная сторона у школ разная")})
+    c_chart = classic.get("chart") or {}
+    m_chart = mirror.get("chart") or {}
+    if c_chart and m_chart:
+        same = c_chart.get("format") == m_chart.get("format")
+        rows.append({"topic": "Летящие звёзды",
+                     "classic": "фасад карты %s, формат %s" % (
+                         _mountain_ru(c_chart.get("facing")), c_chart.get("format")),
+                     "mirror": "фасад карты %s, формат %s" % (
+                         _mountain_ru(m_chart.get("facing")), m_chart.get("format")),
+                     "meaning": "формат совпадает, звёзды стоят иначе" if same
+                                else "формат другой: оценки 旺/衰 у школ не совпадают"})
+    else:
+        rows.append({"topic": "Летящие звёзды", "classic": "карта не рассчитана",
+                     "mirror": "карта не рассчитана",
+                     "meaning": "карта не рассчитана — сравнение невозможно"})
+    return rows
+
+
 def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
-                  feixing_fn=None) -> dict:
+                  feixing_fn=None, school: str | None = None, mirror_dragon: bool = True,
+                  mirror_flying_stars: bool = True) -> dict:
     """Свести пакет участка в структуру 龍穴砂水向 + карта звёзд.
 
     Пакет — `site_pack.json` схемы `site_pack/1` из vector-geo-site. Отсутствующие поля
@@ -205,7 +352,20 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
             orientation.get("facing_true_deg"), climate["facing_mag_deg"],
             abs(declination), " в.д." if declination >= 0 else " з.д."),
             canon="磁偏角 — компас ≠ истинный север")
+    # Солнце и холодный ветер (H7 п. 3): на них стоит аргумент зеркальной школы, поэтому они
+    # показываются в общих данных, а не внутри одной из интерпретаций.
+    sun_block = pack.get("sun") or {}
+    if sun_block:
+        climate["sun"] = {
+            "source": sun_block.get("source"),
+            "noon_side": sun_block.get("noon_side"),
+            "days_noon_north": sun_block.get("days_noon_north"),
+            "days_noon_south": sun_block.get("days_noon_south"),
+            "noons": sun_block.get("noons") or [],
+        }
     exposure = pack.get("exposure") or {}
+    if exposure.get("cold_wind"):
+        climate["cold_wind"] = exposure["cold_wind"]
     wind = {k: exposure.get(k) for k in (
         "wind_prevailing_deg", "wind_prevailing_mountain", "wind_speed_ms",
         "wind_calm_share", "wind_days", "wind_seasonal", "wind_source")
@@ -540,6 +700,38 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
         warnings.append("ещё %d водоток(а) с низкой уверенностью за пределами отчёта — в пакете"
                         % far_low)
 
+    # --- H5–H8: полушарие, режим школы и интерпретации ---
+    hemi = hemisphere(pack)
+    south = hemi == "south"
+    mode = school or ("both" if south else "classic")
+    if mode not in SCHOOLS:
+        raise ValueError("school: ждали classic|mirror|both, получили %r" % (school,))
+    if not south and mode != "classic":
+        warnings.append("школа: зеркальная интерпретация — особенность Южного полушария; "
+                        "для северного участка показана одна классическая")
+        mode = "classic"
+    interp: list[dict] = []
+    for name in (("classic", "mirror") if mode == "both" else (mode,)):
+        interp.append(_school_view(name, pack=pack, spirits=spirits, orientation=orientation,
+                                   facing=facing, year=year, annual=annual, tz=tz,
+                                   feixing_fn=feixing_fn, mirror_dragon=mirror_dragon,
+                                   mirror_flying_stars=mirror_flying_stars))
+    if south and mode != "both":
+        other = "mirror" if mode == "classic" else "classic"
+        warnings.append("школа: показана одна интерпретация (%s); %s не построена — запустите "
+                        "с --school both, чтобы увидеть обе" % (SCHOOL_RU[mode], SCHOOL_RU[other]))
+    if south:
+        warnings.append("школа: ни одна из интерпретаций не называется правильной — школы "
+                        "расходятся в стихиях севера и юга и в предпочтительном фасаде")
+        if equatorial(pack):
+            warnings.append("экватор: участок в пределах %g° от экватора — солнце бывает с обеих "
+                            "сторон, различие школ для этого участка слабее"
+                            % EQUATORIAL_LAT_DEG)
+        if not (_get(pack, "site", "lat") is not None):
+            warnings.append("полушарие: широты в пакете нет — участок прочитан как северный")
+    divergence_rows = (divergences(interp[0], interp[1], facing=facing)
+                       if len(interp) == 2 else [])
+
     return {
         "schema": pack.get("schema"),
         "algo": pack.get("algo"),
@@ -573,14 +765,156 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
             for item in sorted(areas, key=lambda w: (0 if w.get("kind") in {"dock", "sea"} else 1,
                                                      w.get("nearest_m") or 1e9))[:5]
         ],
+        "hemisphere": hemi,
+        "equatorial": equatorial(pack),
+        "school_mode": mode,
+        "interpretations": interp,
+        "divergences": divergence_rows,
         "summary": pack.get("summary"),
         "files": pack.get("files"),
         "attribution": pack.get("attribution"),
     }
 
 
+def _sun_lines(data: dict) -> list[str]:
+    """Солнце и холодный ветер — факты, на которых стоит зеркальная школа (H7 п. 3)."""
+    climate = data.get("climate") or {}
+    sun = climate.get("sun") or {}
+    out: list[str] = []
+    if sun.get("noons"):
+        parts = []
+        for noon in sun["noons"][:3]:
+            parts.append("%s: %s° над горизонтом, азимут %s° (%s)" % (
+                noon.get("event"), noon.get("altitude_deg"), noon.get("azimuth_deg"),
+                _mountain_ru(noon.get("mountain"))))
+        out.append("- солнце в полдень: " + "; ".join(parts))
+        north, south_days = sun.get("days_noon_north"), sun.get("days_noon_south")
+        if north is not None and south_days is not None:
+            out.append("- полуденное солнце: с севера %s дн., с юга %s дн. в году" % (north, south_days))
+    cold = climate.get("cold_wind") or {}
+    if cold:
+        share = _num(cold.get("share_of_days"))
+        out.append("- холодный ветер (%s): дует с %s (%s°), %s м/с, дней в выборке %s%s" % (
+            cold.get("season") or "сезон не указан",
+            _mountain_ru(cold.get("prevailing_from_mountain")), cold.get("prevailing_from_deg"),
+            cold.get("mean_speed_ms"), cold.get("days"),
+            (", %.0f %% дней" % (share * 100)) if share is not None else ""))
+    return out
+
+
+def _interpretation_block(item: dict) -> list[str]:
+    """Один блок интерпретации: стихии, фасад, духи, форма, звёзды."""
+    lines = ["## Интерпретация — %s" % item["label"], ""]
+    variants = item.get("variants") or {}
+    if item["school"] == "mirror":
+        lines.append("Варианты школы: 青龍 = %s, 白虎 = %s; карта %s." % (
+            "right" if variants.get("mirror_dragon") else "left",
+            "left" if variants.get("mirror_dragon") else "right",
+            "по оси, повёрнутой на 180°" if variants.get("mirror_flying_stars") else "по фактической оси"))
+        lines.append("")
+    for check in item.get("checks") or []:
+        lines.append("- **%s.** %s (%s)" % (check["canon"] or "—", check["text"], check["confidence"]))
+    for note in item.get("notes") or []:
+        lines.append("- %s" % note)
+    lines.append("")
+    return lines
+
+
+def _markdown_south(data: dict) -> str:
+    """Отчёт Южного полушария: общие данные, две интерпретации, расхождения, оговорки (H7)."""
+    site = data.get("site") or {}
+    orientation = data.get("orientation") or {}
+    lines: list[str] = ["# Участок: форма, вода, ориентация (Южное полушарие)", ""]
+    lines.append("Координаты: %s, %s · высота %s м · зона UTM %s" % (
+        site.get("lat"), site.get("lon"), site.get("elev_m"), site.get("utm_epsg")))
+    lines.append("")
+    if data.get("school_mode") != "both":
+        lines.append("Показана одна интерпретация (%s); вторая школа не построена." %
+                     SCHOOL_RU.get(data.get("school_mode"), data.get("school_mode")))
+        lines.append("")
+
+    lines.append("## Общие данные (одинаковы для обеих школ)")
+    lines.append("")
+    lines.append("### 向 — ориентация")
+    lines.append("")
+    lines.append("- фасад: %s, сидячая: %s" % (
+        _mountain_ru(orientation.get("facing_mountain")),
+        _mountain_ru(orientation.get("sitting_mountain"))))
+    lines.append("- азимут: %s°, источник: %s, уверенность: %s" % (
+        orientation.get("facing_true_deg"), orientation.get("source"), orientation.get("confidence")))
+    climate = data.get("climate") or {}
+    if climate.get("declination_deg") is not None:
+        lines.append("- компасный азимут: %s° (склонение %s°)" % (
+            climate.get("facing_mag_deg"), climate.get("declination_deg")))
+    lines.append("")
+
+    lines.append("### 砂 — охрана и горы")
+    lines.append("")
+    for check in data.get("checks") or []:
+        if check["code"].startswith(("RING", "SITE", "VEIN", "SPIRIT-BACK", "SPIRIT-FRONT")):
+            lines.append("- **%s.** %s (%s)" % (check["canon"] or "—", check["text"], check["confidence"]))
+    lines.append("")
+
+    lines.append("### 水 — реки и врата")
+    lines.append("")
+    water_checks = [c for c in data.get("checks") or []
+                    if c["code"].startswith(("WATER-", "GATE-", "HIDDEN-", "WATERBODY-"))]
+    for check in water_checks:
+        lines.append("- **%s.** %s (%s)" % (check["canon"] or "—", check["text"], check["confidence"]))
+    if not water_checks:
+        lines.append("- видимой воды в пакете нет")
+    lines.append("")
+
+    sun_lines = _sun_lines(data)
+    if sun_lines:
+        lines.append("### 日 — солнце и холодный ветер")
+        lines.append("")
+        lines.extend(sun_lines)
+        lines.append("")
+
+    for index, item in enumerate(data.get("interpretations") or [], start=1):
+        block = _interpretation_block(item)
+        block[0] = "## Интерпретация %d — %s" % (index, item["label"])
+        lines.extend(block)
+
+    lines.append("## Где школы расходятся")
+    lines.append("")
+    rows = data.get("divergences") or []
+    if rows:
+        lines.append("| Что | Классика | Зеркало | Что это значит для участка |")
+        lines.append("|---|---|---|---|")
+        for row in rows:
+            lines.append("| %s | %s | %s | %s |" % (
+                row.get("topic"), row.get("classic"), row.get("mirror"), row.get("meaning")))
+    elif data.get("school_mode") != "both":
+        lines.append("- вторая школа не построена, сравнивать нечего")
+    lines.append("")
+
+    lines.append("## Оговорки")
+    lines.append("")
+    if data.get("warnings"):
+        for warning in data["warnings"]:
+            lines.append("- %s" % warning)
+    else:
+        lines.append("- оговорок нет")
+    lines.append("")
+    algo = data.get("algo") or {}
+    if algo:
+        lines.append("Версии расчёта: " + ", ".join("%s %s" % (k, v) for k, v in algo.items() if v))
+    files = data.get("files") or {}
+    if files.get("water_geojson"):
+        lines.append("Полный набор воды: %s" % files["water_geojson"])
+    attribution = data.get("attribution") or []
+    if attribution:
+        lines.append("")
+        lines.append(" ".join(attribution))
+    return "\n".join(lines)
+
+
 def landform_markdown(data: dict) -> str:
     """Markdown-отчёт по данным landform_data: измерения, канон, оговорки."""
+    if data.get("hemisphere") == "south":
+        return _markdown_south(data)
     lines: list[str] = []
     site = data.get("site") or {}
     orientation = data.get("orientation") or {}

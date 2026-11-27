@@ -67,6 +67,7 @@ metadata:
 | Про характер, судьбу, 五行, 十神, 大运 по дате рождения | `references/bazi.md` | `pillars` |
 | Про квартиру/офис/направление/даты 飞星 | `references/fengshui.md` | `feixing`, `gua` |
 | Про местность, реки, холмы вокруг дома (龍穴砂水) | `references/fengshui.md` §9 | `landform --pack` |
+| Южное полушарие: две школы, стихии севера и юга, 青龍/白虎, карта звёзд | `references/fengshui.md` §10 | `landform --pack --school both` |
 | Про число гуа, 4 счастливых направления | `references/fengshui.md` (раздел 八宅) | `gua` |
 | Про нумерологию (жизненный путь, психоматрица, личный год) | `references/numerology.md` | `numerology` |
 | «Мы совместимы?», 合婚, супружество, 桃花, «когда встречу…» | `references/supruzhestvo.md` | `match`, `zodiac` |

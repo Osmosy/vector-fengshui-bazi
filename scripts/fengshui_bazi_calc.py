@@ -873,7 +873,10 @@ def cmd_landform(a):
     import landform
 
     pack = landform.load_pack(a.pack)
-    data = landform.landform_data(pack, annual=a.annual, tz=a.tz, feixing_fn=feixing_data)
+    data = landform.landform_data(pack, annual=a.annual, tz=a.tz, feixing_fn=feixing_data,
+                                  school=getattr(a, "school", None),
+                                  mirror_dragon=getattr(a, "mirror_dragon", True),
+                                  mirror_flying_stars=getattr(a, "mirror_flying_stars", True))
     if a.json:
         print(json.dumps(data, ensure_ascii=False, indent=2))
     else:
@@ -936,6 +939,18 @@ def main(argv=None):
     p.add_argument("--pack", required=True, help="путь к site_pack.json из vector-geo-site")
     p.add_argument("--annual", type=int, default=None, help="год для годовых звёзд")
     p.add_argument("--tz", type=float, default=8.0)
+    p.add_argument("--school", choices=("classic", "mirror", "both"), default=None,
+                   help="школа: classic | mirror | both; по умолчанию both для Южного "
+                        "полушария и classic для Северного")
+    p.add_argument("--mirror-dragon", dest="mirror_dragon", action="store_true", default=True,
+                   help="зеркало: 青龍 = right, 白虎 = left (по умолчанию включено)")
+    p.add_argument("--no-mirror-dragon", dest="mirror_dragon", action="store_false",
+                   help="зеркало без перестановки дракона и тигра")
+    p.add_argument("--mirror-flying-stars", dest="mirror_flying_stars", action="store_true",
+                   default=True, help="зеркало: карта звёзд по оси, повёрнутой на 180° "
+                                      "(по умолчанию включено)")
+    p.add_argument("--no-mirror-flying-stars", dest="mirror_flying_stars", action="store_false",
+                   help="зеркало: карта звёзд по фактической оси")
     p.add_argument("--json", action="store_true")
     p.add_argument("--out", default=None, help="записать markdown в файл")
     p.set_defaults(func=cmd_landform)
