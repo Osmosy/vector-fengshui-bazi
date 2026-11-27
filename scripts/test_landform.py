@@ -350,6 +350,99 @@ def run():
     check("схема 2: спина выше фасада прочитана",
           any(c["code"] == "SPIRIT-BACK-STRONG" for c in data_s2["checks"]), True)
 
+    # 19. H5–H8: Южное полушарие — две интерпретации, Северное — одна
+    def south_pack(**over):
+        pack = base_pack()
+        pack["site"] = dict(pack["site"], lat=-33.8688, lon=151.2093, utm_epsg=32756)
+        # схема 2: стороны названы back/front/left/right (H4)
+        pack["schema"] = "site_pack/2"
+        pack["four_spirits"] = {"back": {"rel_elev_m": 40.0}, "front": {"rel_elev_m": 5.0},
+                                "left": {"rel_elev_m": 12.0}, "right": {"rel_elev_m": 30.0},
+                                "left_vs_right": -18.0}
+        pack["sun"] = {"source": "NOAA", "days_noon_north": 365, "days_noon_south": 0,
+                       "noon_side": {"mountain": "子", "side8": "N"},
+                       "noons": [{"event": "december_solstice", "altitude_deg": 79.6,
+                                  "azimuth_deg": 0.0, "mountain": "子"}]}
+        pack.update(over)
+        return pack
+
+    north = L.landform_data(base_pack(), feixing_fn=feixing)
+    check("север: одна интерпретация", len(north["interpretations"]), 1)
+    check("север: школа classic", north["interpretations"][0]["school"], "classic")
+    check("север: расхождений нет", north["divergences"], [])
+    check("север: полушарие", north["hemisphere"], "north")
+
+    south = L.landform_data(south_pack(), feixing_fn=feixing)
+    check("юг: две интерпретации", len(south["interpretations"]), 2)
+    check("юг: первая классика", south["interpretations"][0]["school"], "classic")
+    check("юг: вторая зеркало", south["interpretations"][1]["school"], "mirror")
+    check("юг: раздел расхождений не пуст", len(south["divergences"]) >= 3, True)
+    check("юг: расхождение по стихии севера",
+          next(r for r in south["divergences"] if r["topic"] == "Стихия севера")["mirror"],
+          "Огонь (火)")
+
+    # 20. --school classic на юге: одна интерпретация и оговорка о второй
+    only_classic = L.landform_data(south_pack(), feixing_fn=feixing, school="classic")
+    check("юг --school classic: одна", len(only_classic["interpretations"]), 1)
+    check("юг --school classic: оговорка о второй",
+          any("не построена" in w for w in only_classic["warnings"]), True)
+    only_mirror = L.landform_data(south_pack(), feixing_fn=feixing, school="mirror")
+    check("юг --school mirror: одна и это зеркало", only_mirror["interpretations"][0]["school"],
+          "mirror")
+
+    # 21. Зеркало меняет стихии севера и юга
+    classic_view = south["interpretations"][0]
+    mirror_view = south["interpretations"][1]
+    check("зеркало: север — огонь", mirror_view["elements"]["north"], "Огонь (火)")
+    check("зеркало: юг — вода", mirror_view["elements"]["south"], "Вода (水)")
+    check("классика: север — вода", classic_view["elements"]["north"], "Вода (水)")
+
+    # 22. --mirror-dragon: 青龍 и 白虎 меняются местами (по умолчанию включено)
+    dragon_on = L.landform_data(south_pack(), feixing_fn=feixing)["interpretations"][1]
+    dragon_off = L.landform_data(south_pack(), feixing_fn=feixing,
+                                 mirror_dragon=False)["interpretations"][1]
+    # в схеме 2 left = 12 м, right = 30 м; зеркало берёт дракона справа
+    check("--mirror-dragon: 青龍 справа", dragon_on["dragon"], 30.0)
+    check("--mirror-dragon: 白虎 слева", dragon_on["tiger"], 12.0)
+    check("без перестановки: 青龍 слева", dragon_off["dragon"], 12.0)
+    check("без перестановки: 白虎 справа", dragon_off["tiger"], 30.0)
+    check("--mirror-dragon помечен как вариант школы",
+          any("вариант школы" in n for n in dragon_on["notes"]), True)
+
+    # 23. --mirror-flying-stars: карта по оси, повёрнутой на 180°
+    stars_on = L.landform_data(south_pack(), feixing_fn=feixing)["interpretations"][1]
+    stars_off = L.landform_data(south_pack(), feixing_fn=feixing,
+                                mirror_flying_stars=False)["interpretations"][1]
+    check("--mirror-flying-stars: карта есть", stars_on["chart"] is not None, True)
+    check("--mirror-flying-stars: другая карта",
+          stars_on["chart"]["facing"] != stars_off["chart"]["facing"], True)
+    check("--mirror-flying-stars: ось зеркала = классика + 180",
+          (L.MOUNTAIN_CENTER[stars_on["chart"]["facing"]]
+           - L.MOUNTAIN_CENTER[stars_off["chart"]["facing"]]) % 360, 180)
+
+    # 24. Экваториальный участок получает строку об экваторе
+    eq = south_pack()
+    # юг, но близко к экватору: иначе зеркальная школа не применяется вовсе
+    eq["site"] = dict(eq["site"], lat=-1.3521, lon=103.8198)
+    eq_data = L.landform_data(eq, feixing_fn=feixing)
+    check("экватор: флаг", eq_data["equatorial"], True)
+    check("экватор: строка в оговорках",
+          any("различие школ" in w and "слабее" in w for w in eq_data["warnings"]), True)
+    check("экватор: две интерпретации всё равно есть", len(eq_data["interpretations"]), 2)
+
+    # 25. Отчёт юга: общие данные, две интерпретации, расхождения, оговорки; ни одна не «правильная»
+    md = L.landform_markdown(south)
+    check("отчёт: заголовок юга", md.startswith("# Участок: форма, вода, ориентация (Южное полушарие)"), True)
+    check("отчёт: общие данные", "## Общие данные (одинаковы для обеих школ)" in md, True)
+    check("отчёт: интерпретация 1", "## Интерпретация 1 — классическая школа" in md, True)
+    check("отчёт: интерпретация 2",
+          "## Интерпретация 2 — зеркальная школа (Южное полушарие)" in md, True)
+    check("отчёт: расхождения", "## Где школы расходятся" in md, True)
+    check("отчёт: солнце в общих данных", "日 — солнце и холодный ветер" in md, True)
+    check("отчёт: ни одна не названа правильной",
+          "не называется правильной" in md, True)
+    check("север: отчёт без разделов школ", "## Общие данные" not in L.landform_markdown(north), True)
+
     # 18. Оговорки: только показанное, остальное одной строкой
     check("оговорки: дальние не перечислены",
           any(w.startswith("ещё ") and "в пакете" in w for w in data_fresh["warnings"]), True)
