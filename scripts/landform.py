@@ -469,6 +469,36 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
             vein.get("bends"), vein.get("saddles"), "да" if vein.get("alive") else "нет"),
             confidence="medium", canon="龍 — жила приходит к точке")
 
+    # --- море (S2 в vector-geo-site, E-038): отдельная вода, а не «ещё один водоём» ---
+    sea_block = pack.get("sea") or {}
+    if sea_block:
+        present = sea_block.get("present")
+        if present is True:
+            sectors = sea_block.get("sectors") or []
+            sides = ", ".join(_mountain_ru(s) for s in sectors[:3]) or "сторона не измерена"
+            check("SEA", "море: %s, %s м, %s, уверенность %s; признаки: %s" % (
+                sea_block.get("kind_ru") or "море", sea_block.get("nearest_m"), sides,
+                sea_block.get("confidence") or "нет",
+                ", ".join(sorted({e.get("kind") for e in sea_block.get("evidence") or []}))),
+                confidence=sea_block.get("confidence") or "medium", canon="水 — море")
+            facing_deg = _num(orientation.get("facing_true_deg"))
+            sea_deg = [MOUNTAIN_CENTER[s] for s in sectors if s in MOUNTAIN_CENTER]
+            if facing_deg is not None and sea_deg:
+                front = min(abs((facing_deg - d + 180) % 360 - 180) for d in sea_deg) <= 45
+                check("MINGTANG", "明堂: море %s фасада — %s" % (
+                    "перед" if front else "не перед",
+                    "вода открыта в фасад" if front else "море сбоку или за спиной"),
+                    confidence="medium" if front else "low", canon="明堂 — открытое место перед фасадом")
+        elif present is None:
+            check("SEA", "море: признаки противоречат друг другу — %s" % (
+                sea_block.get("note") or "ответ «не знаю»"),
+                confidence="low", canon="水 — море")
+            warnings.append("море: OSM и снимок расходятся — море записано как «не знаю», "
+                            "а не «нет» (sea_conflict)")
+        else:
+            check("SEA", "море: в кольце не найдено (OSM и снимок согласны)",
+                  confidence=sea_block.get("confidence") or "medium", canon="水 — море")
+
     # --- вода (R2 п. 4, E-019): каждый объект — ровно в одном разделе ---
     # Вода делится на три раздела по данным пакета: видимые русла (來水/去水), подземные (暗水)
     # и водоёмы. До 7.0.0 навык смотрел только на `kind` и показывал трубу и в 來水, и в 暗水.
@@ -765,6 +795,7 @@ def landform_data(pack: dict, *, annual: int | None = None, tz: float = 8.0,
             for item in sorted(areas, key=lambda w: (0 if w.get("kind") in {"dock", "sea"} else 1,
                                                      w.get("nearest_m") or 1e9))[:5]
         ],
+        "sea": sea_block or None,
         "hemisphere": hemi,
         "equatorial": equatorial(pack),
         "school_mode": mode,
@@ -858,7 +889,8 @@ def _markdown_south(data: dict) -> str:
     lines.append("### 水 — реки и врата")
     lines.append("")
     water_checks = [c for c in data.get("checks") or []
-                    if c["code"].startswith(("WATER-", "GATE-", "HIDDEN-", "WATERBODY-"))]
+                    if c["code"].startswith(("SEA", "MINGTANG", "WATER-", "GATE-", "HIDDEN-",
+                                             "WATERBODY-"))]
     for check in water_checks:
         lines.append("- **%s.** %s (%s)" % (check["canon"] or "—", check["text"], check["confidence"]))
     if not water_checks:
@@ -962,7 +994,7 @@ def landform_markdown(data: dict) -> str:
     lines.append("## 水 — реки и врата")
     lines.append("")
     water_checks = [c for c in data.get("checks") or []
-                    if c["code"].startswith(("WATER-", "GATE-"))]
+                    if c["code"].startswith(("SEA", "MINGTANG", "WATER-", "GATE-"))]
     hidden_checks = [c for c in data.get("checks") or [] if c["code"].startswith("HIDDEN-")]
     body_checks = [c for c in data.get("checks") or [] if c["code"].startswith("WATERBODY-")]
 

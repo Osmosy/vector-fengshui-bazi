@@ -350,6 +350,38 @@ def run():
     check("схема 2: спина выше фасада прочитана",
           any(c["code"] == "SPIRIT-BACK-STRONG" for c in data_s2["checks"]), True)
 
+    # 19a. Море: отдельная строка воды и 明堂 (S2 в vector-geo-site)
+    sea_pack = copy.deepcopy(base_pack())
+    sea_pack["sea"] = {"present": True, "kind": "bay", "kind_ru": "залив", "nearest_m": 667.0,
+                       "sectors": ["巽"], "confidence": "high",
+                       "evidence": [{"kind": "polygon", "name": "Port Jackson"}, {"kind": "satellite"}]}
+    sea_data = L.landform_data(sea_pack, feixing_fn=feixing)
+    sea_check = next((c for c in sea_data["checks"] if c["code"] == "SEA"), None)
+    check("море: строка есть", sea_check is not None, True)
+    check("море: вид и расстояние", "залив" in sea_check["text"] and "667.0" in sea_check["text"], True)
+    check("море: признаки перечислены",
+          "polygon" in sea_check["text"] and "satellite" in sea_check["text"], True)
+    mingtang = next((c for c in sea_data["checks"] if c["code"] == "MINGTANG"), None)
+    check("明堂: море в фасаде распознано",
+          mingtang is not None and "перед фасада" in mingtang["text"], True)
+    check("море в markdown", "**水 — море.**" in L.landform_markdown(sea_data), True)
+
+    dry = copy.deepcopy(base_pack())
+    dry["sea"] = {"present": False, "confidence": "medium", "evidence": []}
+    dry_check = next((c for c in L.landform_data(dry, feixing_fn=feixing)["checks"]
+                      if c["code"] == "SEA"), None)
+    check("море: внутренний город — «не найдено»", "не найдено" in dry_check["text"], True)
+
+    conflict = copy.deepcopy(base_pack())
+    conflict["sea"] = {"present": None, "confidence": "low",
+                       "note": "OSM моря не видит, а снимок показывает 62.0 % воды",
+                       "evidence": [{"kind": "satellite", "share": 0.62}]}
+    conflict_data = L.landform_data(conflict, feixing_fn=feixing)
+    conflict_check = next(c for c in conflict_data["checks"] if c["code"] == "SEA")
+    check("море: конфликт → «не знаю»", "противоречат" in conflict_check["text"], True)
+    check("море: конфликт в оговорках",
+          any("«не знаю»" in w for w in conflict_data["warnings"]), True)
+
     # 19. H5–H8: Южное полушарие — две интерпретации, Северное — одна
     def south_pack(**over):
         pack = base_pack()
