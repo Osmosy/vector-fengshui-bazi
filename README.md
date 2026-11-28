@@ -140,7 +140,7 @@ $ python3 fengshui_bazi_calc.py pillars --date 1977-09-23 --time 19:00
 ```bash
 cd scripts
 python3 test_anchors.py     # 34 якоря по датам и гуа
-python3 test_landform.py    # 22 проверки разбора пакета участка
+python3 test_landform.py    # 122 проверки разбора пакета участка
 ```
 
 
